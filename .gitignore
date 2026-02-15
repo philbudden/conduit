@@ -1,0 +1,23 @@
+# Secrets and sensitive files
+*.key
+*.pem
+*.sops
+age.txt
+sops.yaml
+
+# Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Flux decryption keys (if using SOPS)
+.decryption/
+
+# Temporary files
+*.tmp

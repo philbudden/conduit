@@ -1,0 +1,9 @@
+# Flux v2.4.0 (placeholder - use flux install --export for full components)
+# This file is a placeholder indicating where Flux system components should be installed.
+# To generate the complete file, run:
+#   flux install --export > clusters/blueberry-k3s/flux-system/gotk-components.yaml
+#
+# Or use flux bootstrap which will generate this automatically.
+---
+# NOTE: Complete Flux components will be generated during bootstrap
+# This placeholder ensures the directory structure is correct

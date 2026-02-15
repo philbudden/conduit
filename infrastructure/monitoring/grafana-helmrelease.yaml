@@ -1,0 +1,119 @@
+# Grafana HelmRelease
+# Chart: grafana/grafana v8.7.2
+#
+# Configured for edge deployment:
+# - No persistence (emptyDir for now)
+# - Minimal resource requests
+# - Prometheus datasource auto-configured
+# - Default admin/admin credentials (change after first login)
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: grafana
+      version: 8.7.2
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: monitoring
+      interval: 12h
+  maxHistory: 3
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    # Single replica for single-node cluster
+    replicas: 1
+
+    # Resource constraints
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    # No persistence initially
+    persistence:
+      enabled: false
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 80
+
+    # Admin credentials
+    # IMPORTANT: Change these after first login
+    adminUser: admin
+    adminPassword: admin
+
+    # Datasources
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Prometheus
+            type: prometheus
+            url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9091
+            access: proxy
+            isDefault: true
+            jsonData:
+              timeInterval: 60s
+
+    # Dashboards providers
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: 'default'
+            orgId: 1
+            folder: ''
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+    # Pre-installed dashboards
+    dashboards:
+      default:
+        # Kubernetes cluster monitoring dashboard
+        kubernetes-cluster:
+          gnetId: 7249
+          revision: 1
+          datasource: Prometheus
+
+        # Kubernetes pods monitoring
+        kubernetes-pods:
+          gnetId: 6417
+          revision: 1
+          datasource: Prometheus
+
+    # Grafana configuration
+    grafana.ini:
+      analytics:
+        check_for_updates: false
+        reporting_enabled: false
+      server:
+        root_url: http://blueberry-k3s:3000
+      users:
+        auto_assign_org_role: Viewer
+
+    # Image pinning
+    image:
+      repository: grafana/grafana
+      tag: 11.4.0
+      pullPolicy: IfNotPresent
