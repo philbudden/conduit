@@ -50,6 +50,44 @@ jobs:
           tar xf kubeconform-linux-amd64.tar.gz
           sudo mv kubeconform /usr/local/bin/
 
+      - name: Validate with Flux
+        run: |
+          # Build and validate Flux Kustomization syntax
+          # flux build kustomization requires cluster access, so we validate structure instead
+          echo "Validating Flux Kustomization resources..."
+          
+          # Check that all Kustomization resources have required fields
+          for file in clusters/blueberry-k3s/infrastructure.yaml clusters/blueberry-k3s/flux-system/gotk-sync.yaml; do
+            echo "Checking $file..."
+            if ! grep -q "apiVersion: kustomize.toolkit.fluxcd.io" "$file"; then
+              echo "ERROR: $file missing Flux Kustomization apiVersion"
+              exit 1
+            fi
+            if ! grep -q "sourceRef:" "$file"; then
+              echo "ERROR: $file missing sourceRef"
+              exit 1
+            fi
+          done
+          
+          # Validate HelmRelease resources
+          for hr in infrastructure/monitoring/*-helmrelease.yaml; do
+            echo "Checking HelmRelease: $hr..."
+            if ! grep -q "apiVersion: helm.toolkit.fluxcd.io/v2" "$hr"; then
+              echo "ERROR: $hr has incorrect apiVersion"
+              exit 1
+            fi
+            if ! grep -q "chart:" "$hr"; then
+              echo "ERROR: $hr missing chart specification"
+              exit 1
+            fi
+            if ! grep -q "version:" "$hr"; then
+              echo "ERROR: $hr missing chart version (must be pinned)"
+              exit 1
+            fi
+          done
+          
+          echo "✓ Flux resource validation passed"
+
       - name: Validate cluster manifests
         run: |
           kustomize build clusters/blueberry-k3s > /tmp/blueberry-k3s.yaml

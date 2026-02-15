@@ -16,3 +16,12 @@ spec:
   path: ./infrastructure
   prune: true
   wait: true
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kube-prometheus-stack-operator
+      namespace: monitoring
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: grafana
+      namespace: monitoring

@@ -97,15 +97,50 @@ else
 fi
 
 echo ""
-echo "5. Checking for :latest tags..."
+echo "5. Validating Flux resources..."
+FLUX_VALIDATION_PASSED=true
+
+# Check Kustomization resources
+for file in clusters/blueberry-k3s/infrastructure.yaml clusters/blueberry-k3s/flux-system/gotk-sync.yaml; do
+    if ! grep -q "apiVersion: kustomize.toolkit.fluxcd.io" "$file" 2>/dev/null; then
+        failure "Missing Flux apiVersion in $file"
+        FLUX_VALIDATION_PASSED=false
+    fi
+    if ! grep -q "sourceRef:" "$file" 2>/dev/null; then
+        failure "Missing sourceRef in $file"
+        FLUX_VALIDATION_PASSED=false
+    fi
+done
+
+# Check HelmRelease resources
+for hr in infrastructure/monitoring/*-helmrelease.yaml; do
+    [ -f "$hr" ] || continue
+    if ! grep -q "apiVersion: helm.toolkit.fluxcd.io/v2" "$hr"; then
+        failure "Incorrect apiVersion in $hr"
+        FLUX_VALIDATION_PASSED=false
+    fi
+    if ! grep -q "version:" "$hr"; then
+        failure "Missing chart version in $hr"
+        FLUX_VALIDATION_PASSED=false
+    fi
+done 2>/dev/null
+
+if [ "$FLUX_VALIDATION_PASSED" = true ]; then
+    success "Flux resources validated"
+fi
+
+
+echo ""
+echo "6. Checking for :latest tags..."
 if grep -r "image:.*:latest" clusters/ infrastructure/ apps/ 2>/dev/null; then
     failure "Found :latest image tags - all images must be pinned"
 else
     success "No :latest tags found"
 fi
 
+
 echo ""
-echo "6. Checking for explicit namespaces..."
+echo "7. Checking for explicit namespaces..."
 # Check HelmReleases have namespace
 MISSING_NS=$(grep -L "namespace: monitoring" infrastructure/monitoring/*-helmrelease.yaml 2>/dev/null | wc -l)
 if [ "$MISSING_NS" -eq 0 ]; then
@@ -114,20 +149,30 @@ else
     failure "Found HelmRelease without namespace"
 fi
 
+
 echo ""
-echo "7. Verifying Flux v2.4.0 references..."
+echo "8. Verifying Flux v2.4.0 references..."
 if grep -q "v2.4.0" clusters/blueberry-k3s/flux-system/gotk-sync.yaml README.md; then
     success "Flux v2.4.0 referenced in documentation"
 else
     warning "Flux v2.4.0 not clearly referenced"
 fi
 
+
 echo ""
-echo "8. Checking Prometheus port configuration (avoiding Cockpit on 9090)..."
+echo "9. Checking Prometheus port configuration (avoiding Cockpit on 9090)..."
 if grep -q "port: 9091" infrastructure/monitoring/prometheus-helmrelease.yaml; then
     success "Prometheus configured on port 9091 (avoiding Cockpit conflict)"
 else
     failure "Prometheus port not set to 9091"
+fi
+
+echo ""
+echo "10. Checking for health checks in Kustomizations..."
+if grep -q "healthChecks:" clusters/blueberry-k3s/infrastructure.yaml; then
+    success "Infrastructure Kustomization has health checks"
+else
+    failure "Infrastructure Kustomization missing health checks (required by AGENTS.md)"
 fi
 
 echo ""
