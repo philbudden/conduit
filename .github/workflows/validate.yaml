@@ -55,7 +55,7 @@ jobs:
           # Build and validate Flux Kustomization syntax
           # flux build kustomization requires cluster access, so we validate structure instead
           echo "Validating Flux Kustomization resources..."
-          
+
           # Check that all Kustomization resources have required fields
           for file in clusters/blueberry-k3s/infrastructure.yaml clusters/blueberry-k3s/flux-system/gotk-sync.yaml; do
             echo "Checking $file..."
@@ -68,7 +68,7 @@ jobs:
               exit 1
             fi
           done
-          
+
           # Validate HelmRelease resources
           for hr in infrastructure/monitoring/*-helmrelease.yaml; do
             echo "Checking HelmRelease: $hr..."
@@ -85,7 +85,7 @@ jobs:
               exit 1
             fi
           done
-          
+
           echo "✓ Flux resource validation passed"
 
       - name: Validate cluster manifests
@@ -96,7 +96,9 @@ jobs:
       - name: Validate infrastructure
         run: |
           kustomize build infrastructure > /tmp/infrastructure.yaml
-          kubeconform -strict -ignore-missing-schemas -skip CustomResourceDefinition,HelmRelease,HelmRepository,GitRepository,Kustomization /tmp/infrastructure.yaml
+          kubeconform -strict -ignore-missing-schemas \
+            -skip CustomResourceDefinition,HelmRelease,HelmRepository,GitRepository,Kustomization \
+            /tmp/infrastructure.yaml
 
   check-image-tags:
     name: Check for :latest tags
