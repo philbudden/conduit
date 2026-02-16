@@ -52,8 +52,9 @@ spec:
 
     # Service configuration
     service:
-      type: ClusterIP
+      type: NodePort
       port: 80
+      nodePort: 3000
 
     # Admin credentials
     # IMPORTANT: Change these after first login

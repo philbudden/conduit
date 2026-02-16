@@ -47,6 +47,9 @@ spec:
     # Prometheus configuration
     prometheus:
       enabled: true
+      service:
+        type: NodePort
+        nodePort: 9091
       prometheusSpec:
         # Resource constraints for Raspberry Pi
         resources:
