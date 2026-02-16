@@ -17,3 +17,4 @@ rules:
 ignore: |
   .git/
   clusters/blueberry-k3s/flux-system/gotk-components.yaml
+  clusters/blueberry/flux-system/gotk-components.yaml
