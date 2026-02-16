@@ -7,7 +7,8 @@
 # - Disabled: Grafana (deployed separately for cleaner separation)
 # - Disabled: Most default exporters to reduce resource usage
 # - Reduced retention and scrape intervals
-# - Port changed from 9090 to 9091 to avoid conflict with Cockpit
+# - Container port 9091 to avoid conflict with Cockpit (9090)
+# - NodePort 30091 for external access (K8s NodePort range: 30000-32767)
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -49,7 +50,9 @@ spec:
       enabled: true
       service:
         type: NodePort
-        nodePort: 9091
+        # NodePort must be in range 30000-32767
+        # Using 30091 (maps to Prometheus on port 9091 inside cluster)
+        nodePort: 30091
       prometheusSpec:
         # Resource constraints for Raspberry Pi
         resources:

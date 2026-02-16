@@ -54,7 +54,9 @@ spec:
     service:
       type: NodePort
       port: 80
-      nodePort: 3000
+      # NodePort must be in range 30000-32767
+      # Using 30300 (maps to Grafana port 80 inside cluster)
+      nodePort: 30300
 
     # Admin credentials
     # IMPORTANT: Change these after first login
