@@ -1,0 +1,65 @@
+# Headlamp HelmRelease
+# Chart: headlamp/headlamp v0.40.0
+#
+# Headlamp is the official replacement for deprecated Kubernetes Dashboard
+# Actively maintained by kubernetes-sigs, modern UI, ARM64 compatible
+#
+# Configured for edge deployment:
+# - NodePort access (30800 for HTTPS)
+# - Minimal resource requests
+# - Token-based authentication (no cluster-wide admin)
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: headlamp
+  namespace: kubernetes-dashboard
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: headlamp
+      version: 0.40.0
+      sourceRef:
+        kind: HelmRepository
+        name: headlamp
+        namespace: kubernetes-dashboard
+      interval: 12h
+  maxHistory: 3
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    # Resource constraints for edge deployment
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    # Expose via NodePort for SBC access
+    service:
+      type: NodePort
+      nodePort: 30800
+
+    # Replicas for single-node cluster
+    replicaCount: 1
+
+    # Security configuration
+    config:
+      # Use in-cluster config (reads from ServiceAccount)
+      baseURL: ""
+      # No OIDC configuration (using ServiceAccount tokens)
+      oidc:
+        clientID: ""
+        clientSecret: ""
+        issuerURL: ""
+        scopes: ""

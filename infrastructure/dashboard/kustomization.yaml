@@ -6,6 +6,6 @@ resources:
   # HelmRepository must exist before HelmRelease can reference it
   - helm-repository.yaml
   # HelmRelease depends on HelmRepository being available
-  - kubernetes-dashboard-helmrelease.yaml
+  - headlamp-helmrelease.yaml
   # Service account for read-only dashboard access
   - viewer-serviceaccount.yaml

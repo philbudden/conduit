@@ -39,9 +39,5 @@ spec:
       namespace: monitoring
     - apiVersion: apps/v1
       kind: Deployment
-      name: kubernetes-dashboard-kong
-      namespace: kubernetes-dashboard
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: kubernetes-dashboard-web
+      name: headlamp
       namespace: kubernetes-dashboard
