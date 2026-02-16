@@ -9,6 +9,11 @@
 # - Reduced retention and scrape intervals
 # - Container port 9091 to avoid conflict with Cockpit (9090)
 # - NodePort 30091 for external access (K8s NodePort range: 30000-32767)
+#
+# Internet monitoring scrape configs:
+# - speedtest-exporter: 60m interval (bandwidth testing)
+# - blackbox-exporter: 30s interval (HTTP uptime/latency probing)
+# - node-exporter: 15s interval (system metrics)
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -64,8 +69,9 @@ spec:
             memory: 1536Mi
 
         # Retention and storage
-        retention: 7d
-        retentionSize: "4GB"
+        # 30d retention for internet monitoring historical data
+        retention: 30d
+        retentionSize: "10GB"
 
         # No persistent storage initially - use emptyDir
         # Can be enabled later with USB-backed PV if needed
@@ -89,6 +95,44 @@ spec:
         # Service monitors
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false
+
+        # Additional scrape configs for internet monitoring exporters
+        additionalScrapeConfigs:
+          # Speedtest exporter - bandwidth testing via Speedtest.net
+          # WARNING: Downloads 100-500MB per test - 60m interval = ~500MB/day
+          - job_name: 'speedtest'
+            metrics_path: /metrics
+            scrape_interval: 60m
+            scrape_timeout: 90s  # Speedtest takes 30-60s to complete
+            static_configs:
+              - targets: ['speedtest-exporter.monitoring.svc.cluster.local:9798']
+
+          # Blackbox exporter - HTTP probing for uptime and latency
+          - job_name: 'blackbox-http'
+            metrics_path: /probe
+            scrape_interval: 30s
+            params:
+              module: [http_2xx]
+            static_configs:
+              - targets:
+                  - http://www.google.com/
+                  - https://github.com/
+                  - https://www.cloudflare.com/
+            relabel_configs:
+              - source_labels: [__address__]
+                target_label: __param_target
+              - source_labels: [__param_target]
+                target_label: instance
+              - target_label: __address__
+                replacement: blackbox-exporter.monitoring.svc.cluster.local:9115
+
+          # Node exporter - system metrics (CPU, memory, disk, network)
+          - job_name: 'node'
+            scrape_interval: 15s
+            static_configs:
+              - targets: ['node-exporter.monitoring.svc.cluster.local:9100']
+                labels:
+                  instance: 'blueberry-k3s'
 
     # Prometheus Operator configuration
     prometheusOperator:

@@ -25,3 +25,15 @@ spec:
       kind: Deployment
       name: grafana
       namespace: monitoring
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: blackbox-exporter
+      namespace: monitoring
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: speedtest-exporter
+      namespace: monitoring
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: node-exporter
+      namespace: monitoring

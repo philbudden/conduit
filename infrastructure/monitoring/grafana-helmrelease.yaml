@@ -6,6 +6,7 @@
 # - Minimal resource requests
 # - Prometheus datasource auto-configured
 # - Default admin/admin credentials (change after first login)
+# - Internet monitoring dashboard from internet-pi (via ConfigMap)
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -89,6 +90,14 @@ spec:
             editable: true
             options:
               path: /var/lib/grafana/dashboards/default
+          - name: 'internet-monitoring'
+            orgId: 1
+            folder: 'Internet Monitoring'
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/internet-monitoring
 
     # Pre-installed dashboards
     dashboards:
@@ -104,6 +113,19 @@ spec:
           gnetId: 6417
           revision: 1
           datasource: Prometheus
+
+        # Node Exporter Full dashboard
+        node-exporter:
+          gnetId: 1860
+          revision: 37
+          datasource: Prometheus
+
+    # Extra ConfigMap mounts for custom dashboards
+    extraConfigmapMounts:
+      - name: grafana-dashboards
+        mountPath: /var/lib/grafana/dashboards/internet-monitoring
+        configMap: grafana-dashboards
+        readOnly: true
 
     # Grafana configuration
     grafana.ini:
