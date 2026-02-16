@@ -37,3 +37,11 @@ spec:
       kind: DaemonSet
       name: node-exporter
       namespace: monitoring
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kubernetes-dashboard-kong
+      namespace: kubernetes-dashboard
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kubernetes-dashboard-web
+      namespace: kubernetes-dashboard

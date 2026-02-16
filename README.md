@@ -123,7 +123,17 @@ Before bootstrapping Flux, ensure:
    # Look for: blackbox-http (3 targets), speedtest (1 target), node (1 target)
    ```
 
-7. **Access Grafana**:
+7. **Access Kubernetes Dashboard**:
+   ```bash
+   # Get read-only access token (valid for 1 year)
+   kubectl -n kubernetes-dashboard create token dashboard-viewer --duration=8760h
+   
+   # Access dashboard at https://<node-ip>:30800
+   # Login with the token from above
+   # Note: Browser will warn about self-signed cert - this is expected
+   ```
+
+8. **Access Grafana**:
    ```bash
    kubectl port-forward -n monitoring svc/grafana 3000:80
    ```
@@ -192,8 +202,8 @@ Internet monitoring tracks connectivity quality (bandwidth, latency, uptime) to 
 - **Note:** Speedtest metrics appear after first 60-minute scrape cycle
 
 **Resource Usage** (approximate):
-- Total CPU: ~1.55 cores (requests) / ~2.3 cores (limits)
-- Total RAM: ~1.2GB (requests) / ~2.6GB (limits)
+- Total CPU: ~1.6 cores (requests) / ~2.5 cores (limits)
+- Total RAM: ~1.3GB (requests) / ~2.9GB (limits)
 - **Network:** ~500MB/day (speedtest-exporter only)
 - **Storage growth:** ~500MB/week with all exporters enabled
 - Acceptable for 8GB Raspberry Pi 4 with headroom for workloads
@@ -233,6 +243,10 @@ flux reconcile helmrelease -n monitoring grafana
 # Flux controller logs
 flux logs --level=error --all-namespaces
 
+# Kubernetes Dashboard logs
+kubectl logs -n kubernetes-dashboard -l app.kubernetes.io/name=kong
+kubectl logs -n kubernetes-dashboard -l app.kubernetes.io/name=kubernetes-dashboard
+
 # Prometheus operator logs
 kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-operator
 
@@ -246,6 +260,25 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=grafana
 ```bash
 kubectl describe helmrelease -n monitoring kube-prometheus-stack
 kubectl describe helmrelease -n monitoring grafana
+kubectl describe helmrelease -n kubernetes-dashboard kubernetes-dashboard
+```
+
+**Kubernetes Dashboard not accessible**:
+- Verify pod status: `kubectl get pods -n kubernetes-dashboard`
+- Check service: `kubectl get svc -n kubernetes-dashboard kubernetes-dashboard-kong`
+- Check NodePort is 30800: `kubectl get svc -n kubernetes-dashboard -o yaml | grep nodePort`
+- Browser warning about certificate is expected (self-signed)
+
+**Dashboard token issues**:
+```bash
+# Create new token (1 year validity)
+kubectl -n kubernetes-dashboard create token dashboard-viewer --duration=8760h
+
+# Verify service account exists
+kubectl get sa -n kubernetes-dashboard dashboard-viewer
+
+# Check ClusterRoleBinding
+kubectl get clusterrolebinding dashboard-viewer
 ```
 
 **Prometheus not scraping**:
@@ -387,6 +420,34 @@ git push
 ```
 
 **Note:** Prometheus data is stored in emptyDir (ephemeral). Rolling back exporter versions does not affect historical data, but data will be lost if Prometheus pod is deleted.
+
+
+### Upgrading Kubernetes Dashboard
+
+Dashboard is deployed via HelmRelease (version upgrades are simpler than raw manifests).
+
+1. **Check new version** at https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard
+2. **Review release notes** for breaking changes
+3. **Update version** in `infrastructure/dashboard/kubernetes-dashboard-helmrelease.yaml`:
+   ```yaml
+   spec:
+     chart:
+       spec:
+         version: 7.15.0  # Update this line
+   ```
+4. **Commit and push**:
+   ```bash
+   git add infrastructure/dashboard/kubernetes-dashboard-helmrelease.yaml
+   git commit -m "chore(dashboard): upgrade kubernetes-dashboard to v7.15.0"
+   git push
+   ```
+5. **Monitor upgrade**:
+   ```bash
+   flux logs --follow
+   kubectl get pods -n kubernetes-dashboard -w
+   ```
+
+**Rollback:** Same as Helm charts - revert commit or update to previous version.
 
 ### Upgrading Flux
 

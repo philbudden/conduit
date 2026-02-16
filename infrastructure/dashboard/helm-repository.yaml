@@ -1,0 +1,10 @@
+# Kubernetes Dashboard Helm Repository
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+spec:
+  interval: 24h0m0s
+  url: https://kubernetes.github.io/dashboard
