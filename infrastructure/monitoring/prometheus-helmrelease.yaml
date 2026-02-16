@@ -96,6 +96,10 @@ spec:
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false
 
+        # Mount ConfigMap for internet monitoring targets
+        configMaps:
+          - prometheus-internet-targets
+
         # Additional scrape configs for internet monitoring exporters
         additionalScrapeConfigs:
           # Speedtest exporter - bandwidth testing via Speedtest.net
@@ -108,16 +112,16 @@ spec:
               - targets: ['speedtest-exporter.monitoring.svc.cluster.local:9798']
 
           # Blackbox exporter - HTTP probing for uptime and latency
+          # Targets are configurable via prometheus-internet-targets ConfigMap
           - job_name: 'blackbox-http'
             metrics_path: /probe
             scrape_interval: 30s
             params:
               module: [http_2xx]
-            static_configs:
-              - targets:
-                  - http://www.google.com/
-                  - https://github.com/
-                  - https://www.cloudflare.com/
+            file_sd_configs:
+              - files:
+                  - /etc/prometheus/configmaps/prometheus-internet-targets/blackbox-targets.yaml
+                refresh_interval: 30s
             relabel_configs:
               - source_labels: [__address__]
                 target_label: __param_target

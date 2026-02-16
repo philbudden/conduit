@@ -97,7 +97,33 @@ Before bootstrapping Flux, ensure:
    flux get helmreleases -A
    ```
 
-5. **Access Grafana**:
+5. **Verify deployment**:
+   ```bash
+   # Check Flux reconciliation
+   flux get kustomizations
+   flux get helmreleases -A
+   
+   # Verify all monitoring pods are running
+   kubectl get pods -n monitoring
+   
+   # Expected pods:
+   # - kube-prometheus-stack-operator-*
+   # - prometheus-kube-prometheus-stack-prometheus-0
+   # - grafana-*
+   # - blackbox-exporter-*
+   # - speedtest-exporter-*
+   # - node-exporter-* (one per node)
+   ```
+
+6. **Validate internet monitoring**:
+   ```bash
+   # Check Prometheus targets (all should be "UP")
+   kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9091
+   # Visit http://localhost:9091/targets
+   # Look for: blackbox-http (3 targets), speedtest (1 target), node (1 target)
+   ```
+
+7. **Access Grafana**:
    ```bash
    kubectl port-forward -n monitoring svc/grafana 3000:80
    ```
@@ -121,22 +147,55 @@ Before bootstrapping Flux, ensure:
 **Prometheus (kube-prometheus-stack v67.4.0)**:
 - Prometheus Operator + Prometheus server
 - Port: 9091 (to avoid Cockpit conflict on 9090)
-- Retention: 7 days / 4GB
+- Retention: 30 days / 10GB (increased for internet monitoring historical data)
 - Scrape interval: 60s (tuned for edge IO constraints)
 - Resource limits: 1 CPU / 1.5GB RAM
-- **Disabled**: Alertmanager, node-exporter, kube-state-metrics (can enable later)
+- **Disabled**: Alertmanager, built-in node-exporter, kube-state-metrics (can enable later)
 - **No persistence** (emptyDir) - can be added later if needed
 
-**Grafana (v8.7.2 / image 11.4.0)**:
+**Grafana (v8.5.2 / image 11.4.0)**:
 - Pre-configured Prometheus datasource
-- Default dashboards: Kubernetes cluster overview, pod monitoring
+- Default dashboards: Kubernetes cluster overview, pod monitoring, internet connection, node metrics
 - Resource limits: 500m CPU / 512MB RAM
 - **No persistence** (emptyDir)
 - Default credentials: `admin` / `admin` ⚠️ **Change after first login**
 
+**Internet Monitoring Exporters**:
+
+Internet monitoring tracks connectivity quality (bandwidth, latency, uptime) to detect ISP issues or network degradation.
+
+**Blackbox Exporter (prom/blackbox-exporter:v0.25.0)**:
+- HTTP/ICMP probing for uptime and latency monitoring
+- Default targets: google.com, github.com, cloudflare.com (customizable via ConfigMap)
+- Scrape interval: 30s
+- Resource usage: 50m CPU / 64Mi RAM (limits: 200m / 128Mi)
+
+**Speedtest Exporter (miguelndecarvalho/speedtest-exporter:v0.5.1)**:
+- Bandwidth testing via Speedtest.net
+- Scrape interval: 60m
+- ⚠️ **Bandwidth consumption: ~500MB/day** (not suitable for metered connections)
+- To reduce bandwidth, increase scrape interval in `prometheus-helmrelease.yaml`
+- Resource usage: 100m CPU / 128Mi RAM (limits: 500m / 256Mi, spikes during test)
+
+**Node Exporter (prom/node-exporter:v1.8.2)**:
+- System metrics (CPU, memory, disk, network)
+- Deployed as DaemonSet (runs on all nodes)
+- **Security note:** Requires `privileged: true` and `hostNetwork: true` for full system access (standard node-exporter requirement)
+- Deployed separately from kube-prometheus-stack's built-in node-exporter for explicit configuration control and version independence
+- **Important:** Do not enable `nodeExporter.enabled: true` in Prometheus HelmRelease - it will conflict with this deployment
+- Scrape interval: 15s
+- Resource usage: 100m CPU / 128Mi RAM (limits: 250m / 256Mi)
+
+**Grafana Dashboards**:
+- **Internet connection** - Bandwidth graphs, latency gauges, uptime timeline (in "Internet Monitoring" folder)
+- **Node Exporter Full** (gnetId 1860) - System metrics visualization
+- **Note:** Speedtest metrics appear after first 60-minute scrape cycle
+
 **Resource Usage** (approximate):
-- Total CPU: ~1.3 cores (requests) / ~2 cores (limits)
-- Total RAM: ~900MB (requests) / ~2.3GB (limits)
+- Total CPU: ~1.55 cores (requests) / ~2.3 cores (limits)
+- Total RAM: ~1.2GB (requests) / ~2.6GB (limits)
+- **Network:** ~500MB/day (speedtest-exporter only)
+- **Storage growth:** ~500MB/week with all exporters enabled
 - Acceptable for 8GB Raspberry Pi 4 with headroom for workloads
 
 ---
@@ -200,6 +259,62 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:909
 - Verify Prometheus service name: `kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9091`
 - Check Grafana datasource config in Grafana UI
 
+**Speedtest Exporter failures**:
+
+Common causes:
+- DNS resolution failure (check `/etc/resolv.conf` in pod)
+- Speedtest.net outage or rate limiting
+- Network connectivity issues
+- First scrape takes 60 minutes - dashboard gauges remain empty until first test completes
+
+Diagnostics:
+```bash
+kubectl logs -n monitoring -l app=speedtest-exporter
+kubectl exec -it -n monitoring deploy/speedtest-exporter -- ping -c3 www.speedtest.net
+```
+
+**Reducing bandwidth usage**:
+If 500MB/day is too high, edit `infrastructure/monitoring/prometheus-helmrelease.yaml`:
+```yaml
+scrape_interval: 120m  # Reduces to ~250MB/day
+# or
+scrape_interval: 180m  # Reduces to ~170MB/day
+```
+
+**Node Exporter not showing metrics**:
+- Verify privileged security context is allowed
+- Check hostPath mounts are accessible
+- Ensure no port conflict with built-in node-exporter (should be disabled)
+
+---
+
+## Customization
+
+### Customizing Internet Monitoring Targets
+
+To add or change HTTP probe targets:
+
+1. Edit `infrastructure/monitoring/prometheus-targets-configmap.yaml`:
+   ```yaml
+   data:
+     blackbox-targets.yaml: |
+       - targets:
+           - http://www.google.com/
+           - https://github.com/
+           - https://www.cloudflare.com/
+           - https://your-isp-homepage.com/  # Add custom target
+           - http://192.168.1.1/              # Monitor local gateway
+   ```
+
+2. Commit and push:
+   ```bash
+   git add infrastructure/monitoring/prometheus-targets-configmap.yaml
+   git commit -m "chore(monitoring): add custom probe targets"
+   git push
+   ```
+
+3. Prometheus auto-reloads configuration within 30 seconds
+
 ---
 
 ## Upgrade Strategy
@@ -212,6 +327,66 @@ All upgrades must be done via Git commits (PRs recommended).
 2. Review upstream changelog
 3. Test reconciliation: `flux reconcile helmrelease -n monitoring <name>`
 4. Monitor for errors: `flux logs`
+
+### Upgrading Internet Monitoring Exporters (Raw Manifests)
+
+Exporters are deployed as raw Kubernetes manifests (not Helm).
+
+**To upgrade an exporter:**
+
+1. **Check for new version** in upstream repository:
+   - Blackbox: https://github.com/prometheus/blackbox_exporter/releases
+   - Speedtest: https://github.com/MiguelNdeCarvalho/speedtest-exporter/releases
+   - Node: https://github.com/prometheus/node_exporter/releases
+
+2. **Review CHANGELOG** for breaking changes:
+   - ConfigMap structure changes (blackbox-exporter)
+   - Metrics format changes (all exporters)
+   - New resource requirements
+   - Security updates
+
+3. **Update image tag and digest** in `infrastructure/monitoring/exporters/<exporter>.yaml`:
+   ```yaml
+   # Example: Upgrading blackbox-exporter
+   image: prom/blackbox-exporter:v0.26.0@sha256:NEW_DIGEST_HERE
+   ```
+
+4. **Get ARM64 digest** (for Prometheus official images):
+   ```bash
+   docker manifest inspect prom/blackbox-exporter:v0.26.0 | \
+     jq -r '.manifests[] | select(.platform.architecture == "arm64") | .digest'
+   ```
+
+5. **Update ConfigMap if needed** (blackbox-exporter only):
+   ```bash
+   # If blackbox.yml config format changed
+   vim infrastructure/monitoring/exporters/blackbox-exporter.yaml
+   ```
+
+6. **Commit and push**:
+   ```bash
+   git add infrastructure/monitoring/exporters/
+   git commit -m "chore(monitoring): upgrade blackbox-exporter to v0.26.0"
+   git push
+   ```
+
+7. **Verify deployment**:
+   ```bash
+   kubectl get pods -n monitoring -w
+   kubectl logs -n monitoring -l app=blackbox-exporter
+   
+   # Check metrics endpoint
+   kubectl port-forward -n monitoring svc/blackbox-exporter 9115:9115
+   curl http://localhost:9115/metrics
+   ```
+
+**Rollback:** Revert Git commit if issues arise:
+```bash
+git revert HEAD
+git push
+```
+
+**Note:** Prometheus data is stored in emptyDir (ephemeral). Rolling back exporter versions does not affect historical data, but data will be lost if Prometheus pod is deleted.
 
 ### Upgrading Flux
 

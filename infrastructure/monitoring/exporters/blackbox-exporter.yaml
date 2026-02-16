@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: blackbox-exporter
-          image: prom/blackbox-exporter:v0.25.0
+          image: prom/blackbox-exporter:v0.25.0@sha256:9761529b5ff576deb4e823e298ec5ca70e738086fd7d073a84698332c9ae3554
           args:
             - --config.file=/config/blackbox.yml
           ports:

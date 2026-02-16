@@ -8,6 +8,8 @@ resources:
   # HelmReleases depend on HelmRepositories being available
   - prometheus-helmrelease.yaml
   - grafana-helmrelease.yaml
+  # Internet monitoring targets (referenced by Prometheus)
+  - prometheus-targets-configmap.yaml
   # Internet monitoring dashboard
   - grafana-dashboards-configmap.yaml
   # Internet monitoring exporters (blackbox, speedtest, node-exporter)

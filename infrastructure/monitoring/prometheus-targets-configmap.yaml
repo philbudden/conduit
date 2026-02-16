@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-internet-targets
+  namespace: monitoring
+data:
+  blackbox-targets.yaml: |
+    - targets:
+        - http://www.google.com/
+        - https://github.com/
+        - https://www.cloudflare.com/
