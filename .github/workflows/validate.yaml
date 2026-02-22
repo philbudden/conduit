@@ -100,6 +100,11 @@ jobs:
             -skip CustomResourceDefinition,HelmRelease,HelmRepository,GitRepository,Kustomization \
             /tmp/infrastructure.yaml
 
+      - name: Validate apps
+        run: |
+          kustomize build apps > /tmp/apps.yaml
+          kubeconform -strict -ignore-missing-schemas -skip CustomResourceDefinition /tmp/apps.yaml
+
   check-image-tags:
     name: Check for :latest tags
     runs-on: ubuntu-latest

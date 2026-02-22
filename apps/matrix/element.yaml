@@ -1,0 +1,105 @@
+# Element Web - Matrix client UI
+#
+# Official Element web client by Element (ghcr.io/element-hq/element-web).
+# Served as a static web application via nginx inside the container.
+# Configured to point to the local Synapse homeserver.
+#
+# ⚠️  Update config.json base_url and server_name to match your deployment.
+#     Replace <NODE_IP> with the actual IP address of the K3S node.
+---
+# Element Web runtime configuration.
+# config.json is loaded by the browser on startup.
+# ⚠️  Replace <NODE_IP> with the actual K3S node IP before deploying.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: element-config
+  namespace: matrix
+data:
+  config.json: |
+    {
+      "default_server_config": {
+        "m.homeserver": {
+          "base_url": "http://<NODE_IP>:30067",
+          "server_name": "matrix.example.com"
+        }
+      },
+      "brand": "Element",
+      "integrations_ui_url": "",
+      "integrations_rest_url": "",
+      "integrations_widgets_urls": [],
+      "bug_report_endpoint_url": ""
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: element-web
+  namespace: matrix
+  labels:
+    app: element-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: element-web
+  template:
+    metadata:
+      labels:
+        app: element-web
+    spec:
+      containers:
+        - name: element-web
+          # ghcr.io/element-hq/element-web:v1.12.10
+          image: ghcr.io/element-hq/element-web:v1.12.10
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.json
+              subPath: config.json
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: element-config
+---
+# NodePort 30080 → container port 80 (Element Web UI)
+apiVersion: v1
+kind: Service
+metadata:
+  name: element-web
+  namespace: matrix
+  labels:
+    app: element-web
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+      protocol: TCP
+  selector:
+    app: element-web

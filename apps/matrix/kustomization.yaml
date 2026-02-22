@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Namespace must exist before all other resources
+  - namespace.yaml
+  # PostgreSQL: credentials Secret, PVC, Deployment, Service
+  - postgres.yaml
+  # Synapse: config ConfigMap, data PVC, Deployment, Service
+  - synapse.yaml
+  # Element Web: config ConfigMap, Deployment, Service
+  - element.yaml

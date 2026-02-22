@@ -1,0 +1,209 @@
+# Synapse Matrix Homeserver
+#
+# Official Matrix homeserver by Element (ghcr.io/element-hq/synapse).
+# Configured with PostgreSQL backend and persistent data volume.
+# Media store and signing key are persisted in the synapse-data PVC.
+#
+# ⚠️  BEFORE DEPLOYING:
+#   1. Replace CHANGE_ME_BEFORE_DEPLOY in apps/matrix/postgres.yaml (matrix-secrets Secret)
+#   2. Update the db password in this ConfigMap to match POSTGRES_PASSWORD
+#   3. Set server_name and public_baseurl to your actual domain/IP
+#   See README.md#matrix-configuration for details.
+---
+# Synapse homeserver configuration.
+# Non-secret config lives here; secret values are placeholders matched to matrix-secrets.
+# ⚠️  db password here must match POSTGRES_PASSWORD in matrix-secrets Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: synapse-config
+  namespace: matrix
+data:
+  homeserver.yaml: |
+    # Matrix server identity - CHANGE to your actual domain before deploying
+    server_name: "matrix.example.com"
+    # Public URL of this homeserver reachable by clients and federation
+    # For local/SBC use: "http://<NODE_IP>:30067"
+    public_baseurl: "http://matrix.example.com:30067"
+
+    listeners:
+      - port: 8008
+        tls: false
+        type: http
+        x_forwarded: true
+        resources:
+          - names: [client, federation]
+            compress: false
+
+    database:
+      name: psycopg2
+      args:
+        user: synapse
+        # ⚠️  Must match POSTGRES_PASSWORD in matrix-secrets Secret
+        password: CHANGE_ME_BEFORE_DEPLOY
+        database: synapse
+        host: matrix-postgres
+        port: 5432
+        cp_min: 5
+        cp_max: 10
+
+    log_config: "/conf/log.config"
+    media_store_path: /data/media_store
+
+    # ⚠️  Must match SYNAPSE_REGISTRATION_SHARED_SECRET in matrix-secrets Secret
+    registration_shared_secret: "CHANGE_ME_BEFORE_DEPLOY"
+
+    report_stats: false
+
+    # ⚠️  Must match SYNAPSE_MACAROON_SECRET_KEY in matrix-secrets Secret
+    macaroon_secret_key: "CHANGE_ME_BEFORE_DEPLOY"
+
+    # ⚠️  Must match SYNAPSE_FORM_SECRET in matrix-secrets Secret
+    form_secret: "CHANGE_ME_BEFORE_DEPLOY"
+
+    signing_key_path: "/data/signing.key"
+
+    trusted_key_servers:
+      - server_name: "matrix.org"
+
+    # Allow open registration for initial setup.
+    # Disable after creating admin account in production.
+    enable_registration: true
+    enable_registration_without_verification: true
+
+  log.config: |
+    version: 1
+    formatters:
+      precise:
+        format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: precise
+    loggers:
+      synapse.storage.SQL:
+        level: WARNING
+    root:
+      level: INFO
+      handlers: [console]
+    disable_existing_loggers: false
+---
+# PVC for Synapse data: signing key, media store, and other runtime state.
+# Uses default StorageClass (K3S local-path provisioner on blueberry-k3s).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: synapse-data
+  namespace: matrix
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synapse
+  namespace: matrix
+  labels:
+    app: synapse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: synapse
+  template:
+    metadata:
+      labels:
+        app: synapse
+    spec:
+      # Postgres must be ready before Synapse starts
+      initContainers:
+        - name: wait-for-postgres
+          image: docker.io/library/postgres:16.6-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h matrix-postgres -U synapse; do
+                echo "Waiting for PostgreSQL..."; sleep 2;
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: synapse
+          # ghcr.io/element-hq/synapse:v1.147.1
+          # Includes security fix CVE-2026-24044 (insecure signing key federation block)
+          image: ghcr.io/element-hq/synapse:v1.147.1
+          env:
+            - name: SYNAPSE_CONFIG_PATH
+              value: /conf/homeserver.yaml
+          ports:
+            - name: http
+              containerPort: 8008
+              protocol: TCP
+          volumeMounts:
+            # Config files from ConfigMap (read-only)
+            - name: config
+              mountPath: /conf/homeserver.yaml
+              subPath: homeserver.yaml
+              readOnly: true
+            - name: config
+              mountPath: /conf/log.config
+              subPath: log.config
+              readOnly: true
+            # Persistent data: signing key, media store
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8008
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8008
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: synapse-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: synapse-data
+---
+# NodePort 30067 → container port 8008 (Matrix client/federation API)
+apiVersion: v1
+kind: Service
+metadata:
+  name: synapse
+  namespace: matrix
+  labels:
+    app: synapse
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8008
+      targetPort: 8008
+      nodePort: 30067
+      protocol: TCP
+  selector:
+    app: synapse

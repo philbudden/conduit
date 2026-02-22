@@ -1,0 +1,126 @@
+# PostgreSQL for Matrix Synapse
+#
+# Provides a dedicated PostgreSQL instance for Synapse's database backend.
+# Single-replica, no HA - appropriate for edge/SBC deployment.
+#
+# ⚠️  SECRETS: matrix-secrets contains placeholder values.
+#     Replace POSTGRES_PASSWORD with a strong random value before deploying.
+#     See README.md#matrix-secrets for SOPS instructions.
+---
+# Shared secrets for PostgreSQL and Synapse.
+# ⚠️  PLACEHOLDER VALUES - replace before deploying (use SOPS + age).
+# POSTGRES_PASSWORD must match the password set in synapse-config ConfigMap.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: matrix-secrets
+  namespace: matrix
+type: Opaque
+stringData:
+  POSTGRES_USER: synapse
+  POSTGRES_PASSWORD: CHANGE_ME_BEFORE_DEPLOY
+  POSTGRES_DB: synapse
+  SYNAPSE_MACAROON_SECRET_KEY: CHANGE_ME_BEFORE_DEPLOY
+  SYNAPSE_REGISTRATION_SHARED_SECRET: CHANGE_ME_BEFORE_DEPLOY
+  SYNAPSE_FORM_SECRET: CHANGE_ME_BEFORE_DEPLOY
+---
+# PVC for PostgreSQL data directory.
+# Uses default StorageClass (K3S local-path provisioner on blueberry-k3s).
+# USB-attached storage - avoid excessive write amplification.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: matrix-postgres-data
+  namespace: matrix
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrix-postgres
+  namespace: matrix
+  labels:
+    app: matrix-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matrix-postgres
+  template:
+    metadata:
+      labels:
+        app: matrix-postgres
+    spec:
+      containers:
+        - name: postgres
+          # docker.io/library/postgres:16.6-alpine
+          # Alpine variant for smaller image footprint on aarch64
+          image: docker.io/library/postgres:16.6-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            # PGDATA must be a subdirectory of the mount point (Kubernetes requirement)
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          envFrom:
+            - secretRef:
+                name: matrix-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - synapse
+                - -d
+                - synapse
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - synapse
+                - -d
+                - synapse
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: matrix-postgres-data
+---
+# ClusterIP only - PostgreSQL is not exposed outside the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: matrix-postgres
+  namespace: matrix
+  labels:
+    app: matrix-postgres
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app: matrix-postgres
