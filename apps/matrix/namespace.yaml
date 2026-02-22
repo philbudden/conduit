@@ -1,0 +1,8 @@
+# Matrix namespace
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: matrix
+  labels:
+    name: matrix

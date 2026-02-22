@@ -33,7 +33,7 @@ echo "1. Checking repository structure..."
 REQUIRED_DIRS=(
     "clusters/blueberry-k3s/flux-system"
     "infrastructure/monitoring"
-    "apps"
+    "apps/matrix"
     ".github/workflows"
 )
 
@@ -56,6 +56,10 @@ REQUIRED_FILES=(
     "clusters/blueberry-k3s/flux-system/gotk-sync.yaml"
     "infrastructure/monitoring/prometheus-helmrelease.yaml"
     "infrastructure/monitoring/grafana-helmrelease.yaml"
+    "apps/matrix/kustomization.yaml"
+    "apps/matrix/synapse.yaml"
+    "apps/matrix/element.yaml"
+    "apps/matrix/postgres.yaml"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -91,6 +95,12 @@ if command -v kustomize &> /dev/null; then
         success "Infrastructure manifests build successfully"
     else
         failure "Infrastructure manifests failed to build"
+    fi
+
+    if kustomize build apps > /dev/null 2>&1; then
+        success "Apps manifests build successfully"
+    else
+        failure "Apps manifests failed to build"
     fi
 else
     warning "kustomize not installed, skipping manifest build validation"

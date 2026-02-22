@@ -25,10 +25,12 @@ This repository is the **single source of truth** for the `blueberry-k3s` K3S cl
 │   └── blueberry-k3s/          # Cluster-specific entrypoint
 │       ├── flux-system/        # Flux controllers and GitRepository source
 │       ├── infrastructure.yaml # Infrastructure Kustomization
+│       ├── apps.yaml           # Apps Kustomization (depends on infrastructure)
 │       └── kustomization.yaml  # Root composition
 ├── infrastructure/
 │   └── monitoring/             # Prometheus + Grafana observability stack
-├── apps/                       # Application workloads (empty initially)
+├── apps/
+│   └── matrix/                 # Matrix homeserver stack (Synapse + Element + PostgreSQL)
 ├── .github/
 │   └── workflows/              # CI validation (lint, kubeconform, policy checks)
 └── AGENTS.md                   # Repository guardrails and architectural philosophy
@@ -146,9 +148,148 @@ Before bootstrapping Flux, ensure:
    ```
    - URL: http://localhost:9091
 
+9. **Access Element Web (Matrix)**:
+   - URL: `http://<node-ip>:30080`
+   - First create a user account (registration is open by default)
+   - See [Matrix Configuration](#matrix-configuration) for pre-deployment setup
+
 ---
 
+## Matrix Configuration
+
+### Pre-deployment: Set Secrets
+
+**⚠️ You MUST replace placeholder values before deploying the Matrix stack.**
+
+The `apps/matrix/postgres.yaml` Secret and `apps/matrix/synapse.yaml` ConfigMap both contain `CHANGE_ME_BEFORE_DEPLOY` placeholders.
+
+**Option A: Manual (non-production, local testing)**
+
+1. Generate strong random values:
+   ```bash
+   # Generate secret values (run once, save output)
+   python3 -c "import secrets; print(secrets.token_hex(32))"  # POSTGRES_PASSWORD
+   python3 -c "import secrets; print(secrets.token_hex(32))"  # SYNAPSE_MACAROON_SECRET_KEY
+   python3 -c "import secrets; print(secrets.token_hex(32))"  # SYNAPSE_REGISTRATION_SHARED_SECRET
+   python3 -c "import secrets; print(secrets.token_hex(32))"  # SYNAPSE_FORM_SECRET
+   ```
+
+2. Edit `apps/matrix/postgres.yaml`: replace all `CHANGE_ME_BEFORE_DEPLOY` in the Secret.
+
+3. Edit `apps/matrix/synapse.yaml`: replace the `password: CHANGE_ME_BEFORE_DEPLOY` in the
+   `homeserver.yaml` ConfigMap key (must match `POSTGRES_PASSWORD` from step above).
+   Also replace the three `CHANGE_ME_BEFORE_DEPLOY` values for `macaroon_secret_key`,
+   `registration_shared_secret`, and `form_secret`.
+
+**Option B: SOPS + age (recommended for production)**
+
+See the [Flux SOPS guide](https://fluxcd.io/flux/guides/mozilla-sops/) for encrypting
+secrets in Git using age keys.
+
+### Pre-deployment: Update Server Name and URLs
+
+Edit `apps/matrix/synapse.yaml` (ConfigMap `synapse-config`) and set:
+```yaml
+server_name: "your.domain.com"        # Your Matrix server name (cannot change later!)
+public_baseurl: "http://<NODE_IP>:30067"   # Reachable URL for clients
+```
+
+Edit `apps/matrix/element.yaml` (ConfigMap `element-config`) and set:
+```yaml
+"base_url": "http://<NODE_IP>:30067"       # Must match Synapse public_baseurl
+"server_name": "your.domain.com"           # Must match server_name in homeserver.yaml
+```
+
+Replace `<NODE_IP>` with the actual IP address of the K3S node (e.g., `192.168.1.100`).
+
+### Accessing Element
+
+After deployment:
+- **Element Web**: `http://<node-ip>:30080`
+- **Synapse API**: `http://<node-ip>:30067`
+- **Matrix health check**: `http://<node-ip>:30067/health`
+
+### Creating the First Admin User
+
+```bash
+# Register an admin user via Synapse admin API
+kubectl exec -it -n matrix deploy/synapse -- register_new_matrix_user \
+  -c /conf/homeserver.yaml \
+  -u admin \
+  -p <admin-password> \
+  -a \
+  http://localhost:8008
+```
+
+### Disabling Open Registration
+
+After creating your initial accounts, disable open registration by editing
+`apps/matrix/synapse.yaml` ConfigMap and setting:
+```yaml
+enable_registration: false
+```
+
+### Verifying Deployment
+
+```bash
+# Check all Matrix pods are running
+kubectl get pods -n matrix
+
+# Expected pods:
+# - matrix-postgres-*    (PostgreSQL)
+# - synapse-*            (Synapse homeserver)
+# - element-web-*        (Element web client)
+
+# Check Synapse health
+kubectl port-forward -n matrix svc/synapse 8008:8008
+curl http://localhost:8008/health
+# Expected: "OK"
+
+# Check Matrix client discovery
+curl http://localhost:8008/_matrix/client/versions
+```
+
+### Known Limitations
+
+- **No TLS**: Served over HTTP. Add an ingress with TLS cert-manager for production.
+- **No TURN/VoIP**: TURN server is not configured (required for voice/video calls across NAT).
+- **Single replica**: No high availability - acceptable for edge/SBC deployment.
+- **Open federation**: Federation with matrix.org is enabled. Restrict in homeserver.yaml
+  if not desired (`federation_domain_whitelist`).
+- **No SSO/OIDC**: Basic password authentication only.
+
 ## Deployed Components
+
+### Applications
+
+#### Matrix Stack (`apps/matrix/`)
+
+Self-hosted Matrix communications platform:
+
+**PostgreSQL (postgres:16.6-alpine)**:
+- Dedicated database for Synapse
+- 5Gi persistent volume (default StorageClass / K3S local-path)
+- ClusterIP only (not exposed externally)
+- Resource usage: 100m CPU / 256Mi RAM (requests)
+
+**Synapse (ghcr.io/element-hq/synapse:v1.147.1)**:
+- Matrix homeserver by Element
+- 5Gi persistent volume for signing key and media store
+- NodePort 30067 → container port 8008 (client/federation API)
+- Resource usage: 200m CPU / 256Mi RAM (requests), up to 500m CPU / 1Gi RAM
+
+**Element Web (ghcr.io/element-hq/element-web:v1.12.10)**:
+- Official Matrix web client
+- Stateless (no PVC) - serves static files via nginx
+- NodePort 30080 → container port 80
+- Resource usage: 50m CPU / 64Mi RAM (requests)
+
+**Total Matrix resource usage (approximate)**:
+- CPU: ~350m requests / ~700m limits
+- RAM: ~576Mi requests / ~1.2Gi limits
+- Storage: 10Gi (2 × 5Gi PVCs)
+
+---
 
 ### Infrastructure
 
@@ -353,6 +494,28 @@ To add or change HTTP probe targets:
 ## Upgrade Strategy
 
 All upgrades must be done via Git commits (PRs recommended).
+
+### Upgrading Matrix Stack (Raw Manifests)
+
+**Synapse**:
+1. Check new version at https://github.com/element-hq/synapse/releases
+2. Review changelog for breaking changes (especially database migrations)
+3. Update image tag in `apps/matrix/synapse.yaml`:
+   ```yaml
+   image: ghcr.io/element-hq/synapse:vX.Y.Z
+   ```
+4. Commit and push; Flux reconciles automatically
+
+**Element Web**:
+1. Check new version at https://github.com/element-hq/element-web/releases
+2. Update image tag in `apps/matrix/element.yaml`
+3. Commit and push
+
+**PostgreSQL**:
+- PostgreSQL major version upgrades require a dump/restore - plan carefully
+- Minor version upgrades (e.g., 16.6 → 16.7) are safe to apply directly
+
+**Rollback**: Revert the Git commit - Flux will re-pull the previous image tag.
 
 ### Upgrading Helm Charts
 
