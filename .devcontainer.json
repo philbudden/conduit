@@ -1,5 +1,7 @@
 {
   "name": "blueberry-k3s GitOps Dev",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
-  "postCreateCommand": "bash .devcontainer/install-tools.sh"
+  "build": {
+    "dockerfile": ".devcontainer/Dockerfile",
+    "context": "."
+  }
 }
