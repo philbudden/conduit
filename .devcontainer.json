@@ -1,0 +1,7 @@
+{
+  "name": "blueberry-k3s GitOps Dev",
+  "build": {
+    "dockerfile": ".devcontainer/Dockerfile",
+    "context": "."
+  }
+}
