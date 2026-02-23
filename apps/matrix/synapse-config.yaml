@@ -1,89 +1,38 @@
-# synapse-config — Synapse homeserver.yaml configuration
+#ENC[AES256_GCM,data:TgB37CL5fARxYdbthk37z2skJaY5qiRG3K9vy3Fgj8ZG2ZJXn+afGtAQs0M7bVN6rV77lUXQ/uAO,iv:XrxaIwXqskBerszz5bPraeHTzzjRZyU7H49nftqQgy0=,tag:DyW64P3JyJ4T0eFDw9W0ig==,type:comment]
 #
-# ⚠️  THIS FILE MUST BE ENCRYPTED WITH SOPS BEFORE COMMITTING TO GIT.
-#     It embeds cryptographic secrets (macaroon key, form secret, db password,
-#     registration shared secret) directly in the homeserver.yaml content.
-#     This repository is public. Plain-text secrets committed here are immediately
-#     exposed to anyone. Always encrypt before every commit.
+#ENC[AES256_GCM,data:FUUjwXOxwuDhjj3Tm304QS0kFMyAA1cy5rn4z3C5OGbEXEa6pdu0Lk0+xrLe/4mUG1e+OZpSWnYbgiC0oEQbyKRVMZdN5ImW,iv:KMYbsqCwsO9oy1P33QYXkgeQEieyl5zv5VW1EmghrBk=,tag:y5vToiPWHEV72kSyczp3ow==,type:comment]
+#ENC[AES256_GCM,data:yhAkR+tFpqz0sn/qzP6HilgM2n71YSZIgJ+14dcxgHPs1MhY1Ou1wrB05zlXsjM3dekAbOUxdiCXxakdRPoWWYoY8HyYiqnRMFvbEOQ=,iv:FJO331tdpnTti1qyfrgP2YfKWTfa3NAKJhqQMVIDIFQ=,tag:5ELvaEqumH5Kr4EmO/l4Gg==,type:comment]
+#ENC[AES256_GCM,data:4LUvEpXKaZJDXmgimFl2IBnhsQnWNQZcuRGc8f6Pi6a0lqOjX2WLxjgJaTgOhtNOrvb3q+V5OXQd0DOdeFYD8110M282qqcmYw==,iv:Zv97L/C2S1V0g5HfpKIS+OjbiMHwyrXRK6jP4/KgSmw=,tag:pDxd/rlZyzrpkWhtRgiXaw==,type:comment]
+#ENC[AES256_GCM,data:HDl2xUZ0s1t7IeaYv8LYP+nc54lIT3MXjQSX3weNpTXxQAejF0V1C7IkRdFMLaO5uAoG02LC/gH3WX60XIDIOYBkqIir265TeCkkayqhZqvR,iv:QQEaXbK2/RcxI1jZ4+4EfmJy56qHZsgxLKzcZ71dSpw=,tag:Fsy+kbXk8udWi0OXXunaFQ==,type:comment]
+#ENC[AES256_GCM,data:GqNbjNi/mz/4vvqQz3axjyPOmb7xxWDGK0SwsMhl3ZkiQV2Vc/+OPqvzNnxk/bhJGTSjcQ2V8In7pnE=,iv:rYlUJ7iio0yjuwNYlzoVUnv0ih0VyDa4Svc/kozBFF4=,tag:o1a/Yf4yhLpAcVOkfJujbg==,type:comment]
 #
-#     First-time setup:
-#       1. Edit this file: replace all CHANGE_ME_BEFORE_DEPLOY and placeholder values.
-#       2. Encrypt: sops --encrypt --in-place apps/matrix/synapse-config.yaml
-#       3. Commit the encrypted file.
-#     To edit later: sops apps/matrix/synapse-config.yaml
+#ENC[AES256_GCM,data:dM69Gy7hnTKwnUYQW8ikRgFUCalVgw==,iv:mYfxZPMetf3NL2TljLvRccBZ8X2/YpeFhOKXqvTmcfc=,tag:T48H6q05kNrUqqz5wYE+nQ==,type:comment]
+#ENC[AES256_GCM,data:VcQfCsJbaZrPfqRwE432+PCzBeJO3rwUfaecficrbjpyPnP5GYEk761v+fzbnxxz/yc1BUbnaKjfvqfobjT4lSE7NO1od6nlaMJpG/bQiKE2LLr9vA==,iv:iTa3ZbZvC03dePVtZV7AIXQ1RoNnZASoudKYzsOyqKs=,tag:lgQJzhyDayy+rray92RTDw==,type:comment]
+#ENC[AES256_GCM,data:dEYYi3jWkQkPDemPLo4Tl3CQB8TPOeS1IIJyRQRl3Sj4mFO8kQFp5uJiB+3BlY6C2yJmckwm8mY60NjnyZ85JmkGQxx4Epr8lR1yag==,iv:wcFpWuPBO5SVQsD7Q5X/hiJF38RuupsOu6Vbej9rn7g=,tag:LbxGytl1j3ujL+Tss27mXQ==,type:comment]
+#ENC[AES256_GCM,data:5oAzt/HGU4c6OH51kcYdrsBDbfBth2R9FBs8JHx4cHzqgemX,iv:LEa/+C62UTFBQRJ/Vh8K7aeIRf8BqWWu4h6LtoPYRww=,tag:64a+8cay1TXZy+KkcLLETw==,type:comment]
+#ENC[AES256_GCM,data:aqSyx2e41xwQVjp7LISTr9nPIPAVj8Ujg2/5+SMhwcvKWybOnMEeWPutyCYD+0ZIFQaAmIHuUD4=,iv:mdmEgOATREkKkDzz1lw3DpfQT+TaASOdXDCNHkE01Ac=,tag:P4YF+gLJVcyKIlTjVGFwmA==,type:comment]
 #
-#     See MATRIX.md for full setup instructions.
----
-apiVersion: v1
-kind: ConfigMap
+#ENC[AES256_GCM,data:XORKJh49KrNeBf+p1kAfqayzKADLEpOn/+aE9XCXzUBA5hP6M6+7vOfVaZNnMsU=,iv:OSoV/oshkBA3508XeCCpq6PqlIOBf9+uH+/Wjg2fZb4=,tag:owrzqz2e3QaMbZ3FnNp4lw==,type:comment]
+apiVersion: ENC[AES256_GCM,data:kj0=,iv:4H1E8JKTD/0RU2eQQ44q8GKo89+hcYt9XDSiT8hiny8=,tag:Csd2FbpBVEgz9QDj/mring==,type:str]
+kind: ENC[AES256_GCM,data:O0PTH43HGuEK,iv:+2X97Dvo0Z/e/L4QOrmQlIOfh/sDanwlqyAT4qqn7YU=,tag:jWik6coACdUJB2LoXqYl8A==,type:str]
 metadata:
-  name: synapse-config
-  namespace: matrix
+    name: ENC[AES256_GCM,data:fh3DhP9F6oQBFqu8c28=,iv:fnLV6Wg+04LoWYYrU86ShruHj5TK7KESRoA84NFfVwA=,tag:v4JW/XVO0IpNihC6pyHlug==,type:str]
+    namespace: ENC[AES256_GCM,data:wicN+PkN,iv:HvrNDPHxHYU2WTh8aVkrkbMPKv/PCYoQEzxaIPBLheY=,tag:KHcUExbuEgzq0+1paA2QBw==,type:str]
 data:
-  homeserver.yaml: |
-    # Matrix server identity - set to your actual domain or node IP before encrypting.
-    # ⚠️  This value CANNOT be changed after the first user or room is created.
-    server_name: "matrix.example.com"
-
-    # Public URL reachable by clients and federation partners.
-    # For local/SBC use without DNS: "http://<NODE_IP>:30067"
-    public_baseurl: "http://matrix.example.com:30067"
-
-    listeners:
-      - port: 8008
-        tls: false
-        type: http
-        x_forwarded: true
-        resources:
-          - names: [client, federation]
-            compress: false
-
-    database:
-      name: psycopg2
-      args:
-        user: synapse
-        password: CHANGE_ME_BEFORE_DEPLOY
-        database: synapse
-        host: matrix-postgres
-        port: 5432
-        cp_min: 5
-        cp_max: 10
-
-    log_config: "/conf/log.config"
-    media_store_path: /data/media_store
-
-    registration_shared_secret: "CHANGE_ME_BEFORE_DEPLOY"
-
-    report_stats: false
-
-    macaroon_secret_key: "CHANGE_ME_BEFORE_DEPLOY"
-
-    form_secret: "CHANGE_ME_BEFORE_DEPLOY"
-
-    signing_key_path: "/data/signing.key"
-
-    trusted_key_servers:
-      - server_name: "matrix.org"
-
-    # Allow open registration for initial setup.
-    # Disable after creating admin account: set enable_registration: false,
-    # then re-encrypt and commit.
-    enable_registration: true
-    enable_registration_without_verification: true
-
-  log.config: |
-    version: 1
-    formatters:
-      precise:
-        format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s'
-    handlers:
-      console:
-        class: logging.StreamHandler
-        formatter: precise
-    loggers:
-      synapse.storage.SQL:
-        level: WARNING
-    root:
-      level: INFO
-      handlers: [console]
-    disable_existing_loggers: false
+    homeserver.yaml: ENC[AES256_GCM,data:PSt0cpPgDL8u5sD3NpwigJKKXvtqLLyIzXGMDsoDp8m1GW4WXIphPIXxk6nHkVz4GLSzRk+kd6VPDc4R13Ob4hOz6yV5kYH0OcHmZPbDArl/QqVsgltkwSqBN7PlTZhxmwtW1D+urasn7tEmls6Aab6Spl1s+z/nRnkN3EXz3vUIYvIByh3wN1QqbN1yJ9k6un02aOcqyiiAUqFvZpTu1/lgdRTDjYdAN3IzTwtL5+mKEEBlUh1zJLQCZy2QZe1bCsA4oQaSixMFqZzjgeDhkV1ePfnNA+DeTpe6082Xb/c9GQyg0C454LD/umXb7pkZO0nfL3pgvMdv86w1R+27mC/VVjjXXdkV8BRNusOJePsYqCtydigDR+sYsf4GNSF5DCPIcOeviNTSqEbPIpFl9zTa1aDlmXedyox24c7slRIrzQEcXHTvb8m2gljl1DmwjMPYTIiwn4PR0BCSl3CWeMWqculhRrHRP6p5pVqFM6p6qcP65J9/mysZYmpLB16z5z+tYmKWFKQ20RxeUcQ/ubenhLa8dZkXuCY8Ntu5ccJLtqVGdxQ934W5bQIanpmN+LXCyGdqBnkPmKCIp++2btz92qdUQYgvBm5Yl57VmXt+jleNPOpLrJAtY+ap6jjiHKqEgrZXAjwtj97WWmpdhfdXm4upjyQ8OZBHEXv4ywl/WeUSXaIT8d7usaIA2zLBAEsTbw8kbdjwAcCF1XqJriuW/tr0RZkKKKr0qs+poO06wvui66XXUQXKY7eb9oKCaSRTMrN/h4klBaaTgUruo6gcIvOeQBmU5GrI1kjsvvrD7+Mnf81Lyc/l1maY3dYdwVzSf4pLn1dO9qR033Q+ZXVLUyPnpWv1IOEgpfUpRd4aDO66NzCgYlmc+wyR42BiznHWhL2gDw/FRWf6d+wdIIFovSnnPZdwbnFL6inYZcjlYkzz4aep1rcShfPBrKJR47qYPIP+1QZCJ1kJiowliBaKnWAeDSrcOZlHbN02HFKtJ5lAmVMcugj5aVGu/XnQBQTSj+K0xblzK/frzGnx04DoGNDbjdYyWyEaW7GEyjLF43gvXHiR6abe1HaMVt4lyUZB2glkk5ASlCHScqNDgI6huFsfdjjBU8eZA+8kPE16fpKirfDiAlR234WD7LPM9luCVQTgP61vF8Sj35m8FQ0/33Oohm6HToRNMxbcihtr51jlyOZVOYAKdGlo017jgP6MSCNc9fyF+KKgfgfKhghucog3BYZ3CmqJg4VIlPscETMl5YyyDRsUlZallZpkJ83oRxNOxcVhMo8ItwS+YDPBKqaJXQJmOCzBHffERcCJX8dibhA8XDdTnZT4sirQ0KPZTJJI6mw0c3KjrYCoPk2j52VAIQ84ELxLkGrDc7Qup870RA9EuLIDDL1F8tZ44D4QvBSkPo9VGyQ8ZJz6Qq01zebsUuMwMr3dewsaBEVlhXKin3F/wClw71BWe8EOVn2jEE3LryWDW0VEROZE54Qx2uwOmEyJCuVIjufXQYlGZItitNgag4nENbrtxISPUTPVKXMrJREcGN3Hni1adFfe0lvbbxBoa/uDezggwuFkq2mgpsV9capQA8dDmvhgK0brCXgowdII9LupVuyzghJegC0cxfSeWUoAIWVhw+AyL1OUULwyIzL4Kf4p3KMzT/deBYfs08gKYUI608Q71dSWqzCdW0irfbkUnnUXXQduFR78DWd8G1l4XL5jZBmnx6hCz9GYn5OsoE+VtBmRM3067g+ogk7Xy72fWeO+mjntgLyUCJSgk2w9W4srDr+JTjFu15SvVqzYNIPpZDI1A12Wri29J2GTwHWSYI2uDJ/T5fUc0kFKUcxu0zl3kXpqk8FWXBBisb5u,iv:jDaWEgpAAtMX8huQcLnyovHUBfzRMbczZlSAmF8AwVo=,tag:IqVw41824nsQOW4H6irVLQ==,type:str]
+    log.config: ENC[AES256_GCM,data:g+mP98eIfHYtj2fzKv69svboTCTTr6hjNoPbBeh52GI+OUwQB4ao/l4a2TvA5qX4e/8w78nfb2V2rksYer1uAGQdSnGNxzeXjqTsUYCuYiv/dQ5EsV+u51Aq0AKMld20aiJnoLqsRgY+SnXGNfoEqaYIwLFbtdt+SRtbb1rqvoH1Dwd2ZuW8PaG4/uZ+A/B88rI/9or/2SpK/4cdGEDr+nJig+Rn8abjY8vEFjQ9ULcGkz7IkRvICHwgbFDXKIyQB9gIGhnkDrrZDOueBkQYINEAYWAdutoLPB8jrmtcTwQtdLLPIhIBT6T+UwQLH5fb4p18sI2xnbLzGBplnXzza3KG1FKsDfZlT7EUkadLqeXo6oHfiSQAaYyjWR5pdzb35cCUJKHdPEozQ9Y55XKev1Jn52gdUxlB9sghtQ==,iv:LvfoGV2zAo+cVERGGkZMD93+M+dkycejTin7jGQa2kM=,tag:ly28odTZKHNW8O92D95Kpg==,type:str]
+sops:
+    age:
+        - recipient: age19yjfzcwe6qawzsy24g2j99cd3rcuvp5qaq4a6g4ktuufzs2k8y9qnjyc52
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBLQnoyOGkzRXdmQU1odjZ0
+            aVAycFRaZ0xaTVhUN1QyNUFpQnhzT3NrZEQ4CjRKVjdDL2NKMm4vaGxwR3liVjBZ
+            MFhRcDA1cTRuWlhlMklKUWd5ZE1zV1EKLS0tIFJmZ1VBNGZZVW9vUlpTajNUZng1
+            MFBoamZKaVc1b1lGcUw1VVZqZnVSc3cK+fzVCaXM2U4SdinzO0citokMFY4TeL6n
+            xD4ily9V8lQBjvUeZZiofUOz6yTF/4YCG2bHEGMaYW5wQKJVwy4xxA==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-02-23T12:33:12Z"
+    mac: ENC[AES256_GCM,data:A/U9aM72vZjbU3QyGwRu+CjImnjPuMYOmK+XH0X/DL0bczFCB3q0Je+bFKhzoDZw1VfOybI0tskZKDocox6pKNu7J+8+NcAwSCeDX9uQxtgEpZk7R37cFcT4Unxr7LKMRBnfyKU51hfm0HEOP3nHoPmX2rFm7e3+a6CSDIw77yw=,iv:Ek0/jOnsUl7Fif+65hg0e3vo4n0FmWiVGWGvizmxc9M=,tag:MzdNuqXsxevFtFv3U3gZTA==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.12.1
