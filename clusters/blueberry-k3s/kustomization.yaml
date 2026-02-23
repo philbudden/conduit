@@ -5,3 +5,5 @@ resources:
   - flux-system
   # Infrastructure platform components
   - infrastructure.yaml
+  # Application workloads (Matrix stack, etc.)
+  - apps.yaml
