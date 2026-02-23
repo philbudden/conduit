@@ -1,193 +1,267 @@
 # Matrix Deployment Guide
 
-This guide walks you through making the Matrix stack — **Synapse** (homeserver), **Element Web** (client), and **PostgreSQL** (database) — fully operational on your K3s cluster.
+This guide configures the Matrix stack — **Synapse** (homeserver), **Element Web** (client), and **PostgreSQL** (database) — already present in `apps/matrix/` and makes it production-ready on your K3s cluster.
 
-The manifests are already present in `apps/matrix/`. Before they can work, you must supply real values for several placeholder fields. This guide tells you exactly what to change, where, and why, then shows you how to push the change so FluxCD (the GitOps controller) applies it automatically.
+**This repository is public.** Credentials must never appear in plain text in a Git commit. This guide uses **SOPS + age** as the mandatory secret management path. SOPS encrypts secret files before they reach Git; Flux decrypts them inside the cluster at apply time. No secrets are ever visible in the repository.
+
+If you are not familiar with SOPS or age, everything you need is explained below — no prior knowledge assumed.
 
 ---
 
-## How FluxCD works (brief summary)
+## How secrets are kept safe
 
-FluxCD watches this Git repository. When you push a commit, FluxCD notices the change and applies the updated manifests to the cluster — no `kubectl apply` required. That means **all configuration changes go through Git**.
+Two files in `apps/matrix/` contain sensitive values:
+
+- `apps/matrix/matrix-secrets.yaml` — the Kubernetes `Secret` holding PostgreSQL credentials and Synapse cryptographic keys.
+- `apps/matrix/synapse-config.yaml` — the `ConfigMap` containing the full Synapse `homeserver.yaml`, which embeds the database password and cryptographic secrets.
+
+Both files are encrypted with SOPS using an **age** key before being committed to Git. Anyone who views the repository sees only ciphertext. The **private** age key lives only in the cluster (as a Kubernetes Secret in `flux-system`) and on your workstation. Flux's `kustomize-controller` holds that private key and silently decrypts the files at reconcile time.
+
+```
+Your workstation                    Git (public)           Cluster
+─────────────────                   ─────────────          ───────────────────────────
+Generate secrets                    Encrypted blobs        kustomize-controller
+Fill in plain-text files   ──────►  (safe to push)  ────►  decrypts with age private key
+Encrypt with SOPS + age key         No plain text          Applies real Secret + ConfigMap
+```
 
 ---
 
 ## Prerequisites
 
-- `kubectl` access to the K3s cluster (run `kubectl get nodes` to verify)
-- Write access to this Git repository
-- `git` installed on your workstation
-- The cluster must already have Flux bootstrapped and reconciling (run `flux get kustomizations` to check)
+Before starting, check that you have:
+
+- `kubectl` access to the cluster: `kubectl get nodes` should return a node.
+- Flux bootstrapped and reconciling: `flux get kustomizations` should show `READY: True` for `flux-system` and `infrastructure`.
+- Write access to this Git repository.
+
+You also need two tools installed on the workstation you use to manage the cluster. Install them now if missing:
+
+**age** (encryption tool):
+```bash
+# Linux (amd64 or arm64)
+curl -Lo age.tar.gz https://github.com/FiloSottile/age/releases/latest/download/age-v1.2.0-linux-amd64.tar.gz
+tar -xf age.tar.gz && sudo mv age/age age/age-keygen /usr/local/bin/
+
+# macOS
+brew install age
+
+# Verify
+age --version
+```
+
+**sops** (secret file encryption CLI):
+```bash
+# Linux (amd64 or arm64)
+curl -Lo sops https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64
+chmod +x sops && sudo mv sops /usr/local/bin/
+
+# macOS
+brew install sops
+
+# Verify
+sops --version
+```
 
 ---
 
-## Step 1 — Find your K3s node IP address
+## Step 1 — Generate your age keypair
 
-All placeholder references to `<NODE_IP>` must be replaced with the actual IP address of your K3s node. This is the IP address that clients (browsers, Matrix apps) will use to reach Synapse and Element.
+age uses asymmetric cryptography: you encrypt with the **public key**, Flux decrypts with the **private key**. Generate a keypair now.
+
+```bash
+age-keygen -o age.key
+```
+
+The output looks like:
+```
+Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+```
+
+Note the public key — you will use it throughout the rest of this guide. It is safe to share. The private key is in `age.key` — never commit this file.
+
+Add it to `.gitignore` immediately:
+```bash
+echo "age.key" >> .gitignore
+git add .gitignore
+```
+
+---
+
+## Step 2 — Store the private key in the cluster
+
+Flux needs access to the private key to decrypt secrets at reconcile time. Store it as a Kubernetes Secret in the `flux-system` namespace. This Secret is applied out-of-band (directly via kubectl) and is never stored in Git.
+
+```bash
+kubectl create secret generic sops-age \
+  --namespace=flux-system \
+  --from-file=age.agekey=age.key
+```
+
+Verify it was created:
+```bash
+kubectl get secret sops-age -n flux-system
+# Expected: NAME       TYPE     DATA   AGE
+#           sops-age   Opaque   1      <just now>
+```
+
+> **Keep `age.key` safe.** This file is the only way to decrypt secrets if you need to re-create the cluster. Store it in a password manager or encrypted offline backup. If it is lost, you must regenerate all secrets and re-encrypt.
+
+---
+
+## Step 3 — Find your K3s node IP address
 
 ```bash
 kubectl get nodes -o wide
 ```
 
-Look at the `INTERNAL-IP` column. For a single-node cluster on a Raspberry Pi connected to your home network this will be something like `192.168.1.100`.
+Look at the `INTERNAL-IP` column. This is the IP address that browsers and Matrix apps will use to reach Synapse and Element. Write it down — you will use it in Step 5.
 
-> **Why this matters:** Synapse embeds its own public URL in federation responses and client discovery documents. If the URL is wrong, Matrix clients cannot connect and federation with other servers will fail.
+Example: `192.168.1.100`. All examples in this guide use this IP; substitute your real IP throughout.
 
 ---
 
-## Step 2 — Decide on your `server_name`
+## Step 4 — Choose your `server_name`
 
-`server_name` is the **Matrix identity domain** — it is the part after the colon in Matrix IDs such as `@alice:example.com`. This value **cannot be changed after the first user is created** without wiping the database and starting over.
+`server_name` is the **Matrix identity domain** — the part after the colon in Matrix IDs like `@alice:example.com`. This value is permanently embedded in every user account and room created on this server. **It cannot be changed after the first user or room exists** without destroying the database and starting over.
 
-Choose carefully:
+Choose it now, before anything is deployed:
 
-| Scenario | Recommended `server_name` |
+| Scenario | Recommended value |
 |---|---|
-| Personal homeserver, no public DNS | Use the node IP, e.g. `192.168.1.100` |
-| You own a domain and will add DNS later | Use your domain, e.g. `matrix.yourdomain.com` |
-| Local testing only | `localhost` (not reachable by others) |
+| Home lab, no public DNS | Use the node IP: `192.168.1.100` |
+| Own a domain, will configure DNS | Your domain: `matrix.yourdomain.com` |
 
-For a home lab, using the node IP as the server name is the simplest option and requires no DNS configuration. The examples throughout this document use `192.168.1.100` — replace it with your actual IP.
+Using the node IP is the simplest option for a home network and requires no DNS changes.
 
 ---
 
-## Step 3 — Generate secrets
+## Step 5 — Generate secrets
 
-The Matrix stack requires four independent random secrets. Generate them now and keep the output somewhere safe — you will paste them into the manifests in the next steps.
+The Matrix stack requires four independent cryptographic secrets. Generate each one separately:
 
 ```bash
-# Run each line separately; save every output value
 python3 -c "import secrets; print(secrets.token_hex(32))"   # 1. POSTGRES_PASSWORD
-python3 -c "import secrets; print(secrets.token_hex(32))"   # 2. MACAROON_SECRET_KEY
-python3 -c "import secrets; print(secrets.token_hex(32))"   # 3. REGISTRATION_SHARED_SECRET
-python3 -c "import secrets; print(secrets.token_hex(32))"   # 4. FORM_SECRET
+python3 -c "import secrets; print(secrets.token_hex(32))"   # 2. SYNAPSE_MACAROON_SECRET_KEY
+python3 -c "import secrets; print(secrets.token_hex(32))"   # 3. SYNAPSE_REGISTRATION_SHARED_SECRET
+python3 -c "import secrets; print(secrets.token_hex(32))"   # 4. SYNAPSE_FORM_SECRET
 ```
 
-Each command produces a different 64-character hex string, for example:
-
-```
-a3f8c2e1d4b7a0f9e6c3d1b8a5f2e9c6d3b0a7f4e1c8d5b2a9f6e3c0d7b4a1f8
-```
-
-Label your four values clearly. You will need all four in Steps 4 and 5.
-
-> **Security note:** These secrets protect your Matrix server against token forgery and database access. Never commit them to a public repository in plain text. For a private repository this is acceptable for a home lab; for any public or shared repository use SOPS encryption (see [Production Hardening](#production-hardening) below).
+Each command produces a 64-character hex string. Label them clearly — you need all four in the next step, and value 1 (`POSTGRES_PASSWORD`) is also needed in Step 7.
 
 ---
 
-## Step 4 — Edit `apps/matrix/postgres.yaml`
+## Step 6 — Populate `apps/matrix/matrix-secrets.yaml`
 
-Open `apps/matrix/postgres.yaml` in your editor. Find the `Secret` resource named `matrix-secrets` (near the top of the file).
+Open `apps/matrix/matrix-secrets.yaml`. Replace every `CHANGE_ME_BEFORE_DEPLOY` with the values you generated:
 
-**Before:**
 ```yaml
 stringData:
   POSTGRES_USER: synapse
-  POSTGRES_PASSWORD: CHANGE_ME_BEFORE_DEPLOY
-  POSTGRES_DB: synapse
-  SYNAPSE_MACAROON_SECRET_KEY: CHANGE_ME_BEFORE_DEPLOY
-  SYNAPSE_REGISTRATION_SHARED_SECRET: CHANGE_ME_BEFORE_DEPLOY
-  SYNAPSE_FORM_SECRET: CHANGE_ME_BEFORE_DEPLOY
-```
-
-**After** (replace with your generated values from Step 3):
-```yaml
-stringData:
-  POSTGRES_USER: synapse
-  POSTGRES_PASSWORD: a3f8c2e1d4b7a0f9e6c3d1b8a5f2e9c6d3b0a7f4e1c8d5b2a9f6e3c0d7b4a1f8
+  POSTGRES_PASSWORD: <your-value-1>
   POSTGRES_DB: synapse
   SYNAPSE_MACAROON_SECRET_KEY: <your-value-2>
   SYNAPSE_REGISTRATION_SHARED_SECRET: <your-value-3>
   SYNAPSE_FORM_SECRET: <your-value-4>
 ```
 
-> **Why this file holds all four secrets:** PostgreSQL needs `POSTGRES_PASSWORD` at startup to create the database user. The three Synapse secrets (`MACAROON_SECRET_KEY`, `REGISTRATION_SHARED_SECRET`, `FORM_SECRET`) are stored here in the same Kubernetes Secret so that a future SOPS encryption step only needs to encrypt one file.
+Do **not** commit this file yet — it still contains plain text.
 
 ---
 
-## Step 5 — Edit `apps/matrix/synapse.yaml`
+## Step 7 — Populate `apps/matrix/synapse-config.yaml`
 
-Open `apps/matrix/synapse.yaml`. This file contains the `synapse-config` ConfigMap with Synapse's `homeserver.yaml` configuration embedded inside it.
+Open `apps/matrix/synapse-config.yaml`. This file contains the full Synapse configuration including both secrets and non-secret settings. Edit everything marked with a placeholder:
 
-You need to make **five replacements** in this file.
-
-### 5a — Set `server_name`
-
-Find the line:
-```yaml
-    server_name: "matrix.example.com"
-```
-
-Replace with your chosen server name from Step 2:
+### 7a — Set `server_name`
 ```yaml
     server_name: "192.168.1.100"
 ```
+Replace `matrix.example.com` with your value from Step 4.
 
-### 5b — Set `public_baseurl`
-
-Find the line:
-```yaml
-    public_baseurl: "http://matrix.example.com:30067"
-```
-
-Replace with the URL that browsers and Matrix apps will use to reach your Synapse:
+### 7b — Set `public_baseurl`
 ```yaml
     public_baseurl: "http://192.168.1.100:30067"
 ```
+Replace `matrix.example.com:30067` with `<NODE_IP>:30067` using your node IP from Step 3.
 
-Port `30067` is the NodePort already defined in the Service — do not change it unless you also change the `nodePort` value in the Service spec.
-
-### 5c — Set the database password
-
-Find the database block:
+### 7c — Set the database password
 ```yaml
     database:
       name: psycopg2
       args:
         user: synapse
-        # ⚠️  Must match POSTGRES_PASSWORD in matrix-secrets Secret
-        password: CHANGE_ME_BEFORE_DEPLOY
+        password: <your-value-1>
 ```
+Replace `CHANGE_ME_BEFORE_DEPLOY` with **the same value you used for `POSTGRES_PASSWORD` in Step 6.** These must match or Synapse cannot connect to PostgreSQL.
 
-Replace `CHANGE_ME_BEFORE_DEPLOY` with **the same value you used for `POSTGRES_PASSWORD` in Step 4**. These two values must be identical or Synapse will fail to connect to PostgreSQL.
-
-```yaml
-        password: a3f8c2e1d4b7a0f9e6c3d1b8a5f2e9c6d3b0a7f4e1c8d5b2a9f6e3c0d7b4a1f8
-```
-
-### 5d — Set `registration_shared_secret`
-
-Find:
-```yaml
-    registration_shared_secret: "CHANGE_ME_BEFORE_DEPLOY"
-```
-
-Replace with your value 3 from Step 3 (must match `SYNAPSE_REGISTRATION_SHARED_SECRET` in Step 4):
+### 7d — Set `registration_shared_secret`
 ```yaml
     registration_shared_secret: "<your-value-3>"
 ```
+Replace `CHANGE_ME_BEFORE_DEPLOY` with value 3 from Step 5.
 
-### 5e — Set `macaroon_secret_key` and `form_secret`
-
-Find:
+### 7e — Set `macaroon_secret_key` and `form_secret`
 ```yaml
-    macaroon_secret_key: "CHANGE_ME_BEFORE_DEPLOY"
+    macaroon_secret_key: "<your-value-2>"
+    form_secret: "<your-value-4>"
 ```
-Replace with your value 2 from Step 3 (must match `SYNAPSE_MACAROON_SECRET_KEY`).
+Replace both `CHANGE_ME_BEFORE_DEPLOY` values with values 2 and 4 from Step 5.
 
-Find:
-```yaml
-    form_secret: "CHANGE_ME_BEFORE_DEPLOY"
-```
-Replace with your value 4 from Step 3 (must match `SYNAPSE_FORM_SECRET`).
-
-> **Why the ConfigMap contains secrets:** Synapse reads its configuration from `homeserver.yaml` as a file mounted from the ConfigMap. Unlike environment variables, Kubernetes cannot inject individual Secret keys into a YAML file — so the password and cryptographic keys appear here. This is a known limitation of how Synapse is configured. The values in this ConfigMap must exactly match the values in the `matrix-secrets` Secret in `postgres.yaml`.
+Do **not** commit this file yet.
 
 ---
 
-## Step 6 — Edit `apps/matrix/element.yaml`
+## Step 8 — Verify all placeholders are replaced
 
-Open `apps/matrix/element.yaml`. Find the `element-config` ConfigMap containing `config.json`.
+Before encrypting, confirm there are no remaining placeholder values in either file:
+
+```bash
+grep -n "CHANGE_ME_BEFORE_DEPLOY\|matrix\.example\.com" \
+  apps/matrix/matrix-secrets.yaml \
+  apps/matrix/synapse-config.yaml
+```
+
+This command must return **no output**. Any output means a placeholder was missed — go back and fix it before continuing.
+
+---
+
+## Step 9 — Encrypt both files with SOPS
+
+Use your age public key from Step 1. Replace `age1ql3z7...` with your actual public key:
+
+```bash
+AGE_PUBLIC_KEY="age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"
+
+sops --encrypt \
+  --age "$AGE_PUBLIC_KEY" \
+  --in-place \
+  apps/matrix/matrix-secrets.yaml
+
+sops --encrypt \
+  --age "$AGE_PUBLIC_KEY" \
+  --in-place \
+  apps/matrix/synapse-config.yaml
+```
+
+After running these commands, both files are rewritten in place. The `stringData` values and all configuration content are replaced with ciphertext. Verify:
+
+```bash
+grep "ENC\[" apps/matrix/matrix-secrets.yaml | head -3
+grep "ENC\[" apps/matrix/synapse-config.yaml | head -3
+```
+
+You should see multiple lines starting with `ENC[AES256_GCM,...`. This confirms the files are encrypted.
+
+At this point, the files are safe to commit to the public repository.
+
+> **Editing encrypted files in the future:** Use `sops apps/matrix/synapse-config.yaml` (without `--encrypt`). SOPS decrypts the file in memory, opens your `$EDITOR`, and re-encrypts when you save and close. Never manually edit an encrypted file.
+
+---
+
+## Step 10 — Update Element Web configuration
+
+Open `apps/matrix/element.yaml`. Find the `element-config` ConfigMap and update the two placeholder values. This file contains **no secrets** — it is committed in plain text.
 
 **Before:**
 ```json
@@ -197,8 +271,7 @@ Open `apps/matrix/element.yaml`. Find the `element-config` ConfigMap containing 
       "base_url": "http://<NODE_IP>:30067",
       "server_name": "matrix.example.com"
     }
-  },
-  ...
+  }
 }
 ```
 
@@ -210,68 +283,58 @@ Open `apps/matrix/element.yaml`. Find the `element-config` ConfigMap containing 
       "base_url": "http://192.168.1.100:30067",
       "server_name": "192.168.1.100"
     }
-  },
-  ...
+  }
 }
 ```
 
-- `base_url` must exactly match `public_baseurl` set in `synapse.yaml` (Step 5b).
-- `server_name` must exactly match `server_name` set in `synapse.yaml` (Step 5a).
+- `base_url` must exactly match `public_baseurl` set in `synapse-config.yaml`.
+- `server_name` must exactly match `server_name` set in `synapse-config.yaml`.
 
-> **Why Element needs these values:** Element is a static web app running in the browser. It needs to know the URL to reach Synapse (`base_url`) and the Matrix identity domain (`server_name`) before it can display the login screen. If these are wrong, you will see "Homeserver not found" errors.
+Confirm no placeholders remain:
+```bash
+grep -n "NODE_IP\|matrix\.example\.com" apps/matrix/element.yaml
+```
+
+This must return no output before you continue.
 
 ---
 
-## Step 7 — Verify your changes before committing
+## Step 11 — Commit and push
 
-Before pushing, do a quick sanity check to confirm all placeholders are gone:
-
-```bash
-# Should return no output (no remaining placeholders)
-grep -r "CHANGE_ME_BEFORE_DEPLOY" apps/matrix/
-grep -r "<NODE_IP>" apps/matrix/
-grep -r "matrix\.example\.com" apps/matrix/
-```
-
-If any line is returned, go back and fix it before continuing.
-
-Also confirm the password value matches across both files:
+The encrypted files and updated `element.yaml` are now safe to commit. The secrets in `matrix-secrets.yaml` and `synapse-config.yaml` are ciphertext — decryptable only with the private key stored in your cluster and in your `age.key` file.
 
 ```bash
-# Extract password from postgres.yaml (should be identical in both outputs)
-grep "POSTGRES_PASSWORD:" apps/matrix/postgres.yaml
-grep "password:" apps/matrix/synapse.yaml | head -1
-```
+git add apps/matrix/matrix-secrets.yaml \
+        apps/matrix/synapse-config.yaml \
+        apps/matrix/element.yaml \
+        .gitignore
 
----
-
-## Step 8 — Commit and push
-
-FluxCD applies changes from Git. You must commit and push for the cluster to receive the updated manifests.
-
-```bash
-git add apps/matrix/postgres.yaml apps/matrix/synapse.yaml apps/matrix/element.yaml
-git commit -m "feat(matrix): configure secrets and server identity"
+git commit -m "feat(matrix): configure and encrypt Matrix secrets and server identity"
 git push
 ```
 
-> **What happens next:** FluxCD polls the repository every 5 minutes (or sooner if you trigger it manually). It will detect the new commit, build the manifests, and apply them to the cluster. PostgreSQL will start first; Synapse has an init container that waits for PostgreSQL to be ready before starting; Element Web starts last.
+> **Before every future commit**, check that no plain-text secrets are accidentally staged:
+> ```bash
+> git diff --cached apps/matrix/ | grep -i "CHANGE_ME\|password:" | grep -v "ENC\["
+> ```
+> If any plain-text password or placeholder appears, abort with `git reset HEAD` and re-encrypt.
 
 ---
 
-## Step 9 — Watch Flux reconcile
+## Step 12 — Watch Flux reconcile
 
-On your cluster (or via `kubectl` from your workstation):
+Flux polls the repository every 5 minutes. Trigger an immediate reconcile:
 
 ```bash
-# Watch Flux apply the change (refresh every 5 seconds)
-watch flux get kustomizations
-
-# Or trigger reconciliation immediately without waiting for the poll interval
 flux reconcile kustomization apps --with-source
 ```
 
-Expected output once reconciled:
+Watch reconciliation progress:
+```bash
+watch flux get kustomizations
+```
+
+Expected output once complete:
 ```
 NAME            REVISION        SUSPENDED  READY   MESSAGE
 flux-system     main/abc1234    False      True    Applied revision: main/abc1234
@@ -279,25 +342,25 @@ infrastructure  main/abc1234    False      True    Applied revision: main/abc123
 apps            main/abc1234    False      True    Applied revision: main/abc1234
 ```
 
-All three kustomizations should show `READY: True`.
+All three kustomizations must show `READY: True`. The `apps` kustomization uses the `sops-age` Secret you created in Step 2 to decrypt `matrix-secrets.yaml` and `synapse-config.yaml` before applying them.
 
 ---
 
-## Step 10 — Verify the pods are running
+## Step 13 — Verify the pods are running
 
 ```bash
 kubectl get pods -n matrix
 ```
 
-Expected output (all three pods `Running`, `READY 1/1`):
+Expected (all three `Running`, `READY 1/1`):
 ```
-NAME                              READY   STATUS    RESTARTS   AGE
-element-web-xxxxxxxxxx-xxxxx      1/1     Running   0          2m
-matrix-postgres-xxxxxxxxxx-xxxxx  1/1     Running   0          3m
-synapse-xxxxxxxxxx-xxxxx          1/1     Running   0          2m
+NAME                               READY   STATUS    RESTARTS   AGE
+element-web-xxxxxxxxxx-xxxxx       1/1     Running   0          2m
+matrix-postgres-xxxxxxxxxx-xxxxx   1/1     Running   0          3m
+synapse-xxxxxxxxxx-xxxxx           1/1     Running   0          2m
 ```
 
-If a pod is not `Running`, check its logs:
+If any pod is not `Running`, check its logs:
 ```bash
 kubectl logs -n matrix deploy/synapse
 kubectl logs -n matrix deploy/matrix-postgres
@@ -306,23 +369,24 @@ kubectl logs -n matrix deploy/element-web
 
 ---
 
-## Step 11 — Confirm Synapse is healthy
+## Step 14 — Confirm Synapse is healthy
 
 ```bash
-# Port-forward Synapse to your workstation
-kubectl port-forward -n matrix svc/synapse 8008:8008
+# Port-forward to your workstation
+kubectl port-forward -n matrix svc/synapse 8008:8008 &
 
-# In a second terminal, check the health endpoint
+# Health check (in another terminal)
 curl http://localhost:8008/health
-# Expected response: OK
+# Expected response body: OK
 
-# Confirm the Matrix API is responding
+# Matrix API discovery
 curl http://localhost:8008/_matrix/client/versions
-# Expected: JSON object listing Matrix spec versions
+# Expected: JSON with Matrix spec versions
+
+kill %1  # stop the port-forward
 ```
 
-You can also check Synapse directly on the NodePort from any machine on your network:
-
+You can also check directly on the NodePort from any device on your network:
 ```bash
 curl http://192.168.1.100:30067/health
 # Expected: OK
@@ -330,30 +394,24 @@ curl http://192.168.1.100:30067/health
 
 ---
 
-## Step 12 — Open Element Web
+## Step 15 — Open Element Web
 
 Navigate to `http://192.168.1.100:30080` in your browser.
 
-You should see the Element Web login screen. The homeserver should already be pre-filled to your server name from the config.
-
-If you see a **"Homeserver not found"** error, confirm:
-- `base_url` in `element.yaml` matches `public_baseurl` in `synapse.yaml`
-- The Synapse NodePort (30067) is reachable: `curl http://192.168.1.100:30067/health`
+The Element login screen should appear with the homeserver pre-configured. If you see **"Homeserver not found"**, see the Troubleshooting section below.
 
 ---
 
-## Step 13 — Create the first admin user
+## Step 16 — Create the first admin user
 
-Registration is currently open (`enable_registration: true`) which allows anyone on the network to create an account. Use this window to create your admin account.
+Open registration is currently enabled, which allows anyone on the network to create an account. Use this window to create your admin account before closing registration in Step 17.
 
-**Option A — via Element Web (simplest)**
-
-1. Open `http://192.168.1.100:30080`
+**Option A — via Element Web:**
+1. Go to `http://192.168.1.100:30080`
 2. Click **Create Account**
-3. Create your admin account (e.g. username: `admin`)
+3. Register your admin username (e.g. `admin`)
 
-**Option B — via the Synapse admin API (more reliable)**
-
+**Option B — via the Synapse admin API (recommended — grants explicit admin rights):**
 ```bash
 kubectl exec -it -n matrix deploy/synapse -- \
   register_new_matrix_user \
@@ -364,203 +422,218 @@ kubectl exec -it -n matrix deploy/synapse -- \
   http://localhost:8008
 ```
 
-The `-a` flag grants admin rights. Without it the account is a regular user.
-
-> **Important:** Do this before disabling open registration in Step 14.
+The `-a` flag grants server administrator rights. Without it, the account is a regular user.
 
 ---
 
-## Step 14 — Disable open registration
+## Step 17 — Disable open registration
 
-Once your admin account (and any other initial accounts) are created, disable open registration so that random users cannot sign up.
+Once your initial accounts are created, close registration to prevent unauthorised sign-ups.
 
-Edit `apps/matrix/synapse.yaml`. Find these two lines in the ConfigMap:
-
-```yaml
-    enable_registration: true
-    enable_registration_without_verification: true
+Edit `synapse-config.yaml` using SOPS (so the file stays encrypted):
+```bash
+sops apps/matrix/synapse-config.yaml
 ```
 
-Change them to:
+Your editor opens with the decrypted content. Find these two lines and change them:
 ```yaml
     enable_registration: false
     enable_registration_without_verification: false
 ```
 
+Save and close the editor. SOPS re-encrypts the file automatically.
+
 Commit and push:
 ```bash
-git add apps/matrix/synapse.yaml
+git add apps/matrix/synapse-config.yaml
 git commit -m "feat(matrix): disable open registration"
 git push
 ```
 
-Flux will apply the change and restart Synapse automatically. Verify with:
+Flux will reconcile and restart Synapse. Monitor:
 ```bash
 kubectl rollout status -n matrix deploy/synapse
 ```
 
 ---
 
-## Step 15 — Final end-to-end check
+## Step 18 — Final validation
 
 ```bash
-# All Matrix pods healthy
+# All Matrix pods running
 kubectl get pods -n matrix
 
-# Synapse health endpoint
+# Synapse health
 curl http://192.168.1.100:30067/health
+# Expected: OK
 
-# Registration is disabled (should return HTTP 403 or error JSON, not a registration form)
-curl -s http://192.168.1.100:30067/_matrix/client/v3/register | grep -i "forbidden\|not allowed\|M_FORBIDDEN"
+# Registration is closed (expect HTTP 403 or M_FORBIDDEN)
+curl -s http://192.168.1.100:30067/_matrix/client/v3/register \
+  -X POST -H "Content-Type: application/json" -d '{"kind":"guest"}' \
+  | python3 -m json.tool | grep -i "errcode"
+# Expected: "errcode": "M_FORBIDDEN" or similar
 
-# Flux shows all kustomizations as READY
+# Flux reports all kustomizations healthy
 flux get kustomizations
 ```
 
 ---
 
-## Reference: Summary of all changes required
+## Reference: all required changes at a glance
 
-| File | Field | What to set |
+| File | What to change | Notes |
 |---|---|---|
-| `apps/matrix/postgres.yaml` | `POSTGRES_PASSWORD` | Generated secret (value 1 from Step 3) |
-| `apps/matrix/postgres.yaml` | `SYNAPSE_MACAROON_SECRET_KEY` | Generated secret (value 2) |
-| `apps/matrix/postgres.yaml` | `SYNAPSE_REGISTRATION_SHARED_SECRET` | Generated secret (value 3) |
-| `apps/matrix/postgres.yaml` | `SYNAPSE_FORM_SECRET` | Generated secret (value 4) |
-| `apps/matrix/synapse.yaml` | `server_name` | Your Matrix identity domain (cannot change later) |
-| `apps/matrix/synapse.yaml` | `public_baseurl` | `http://<NODE_IP>:30067` |
-| `apps/matrix/synapse.yaml` | `database.args.password` | Same as `POSTGRES_PASSWORD` above |
-| `apps/matrix/synapse.yaml` | `registration_shared_secret` | Same as `SYNAPSE_REGISTRATION_SHARED_SECRET` above |
-| `apps/matrix/synapse.yaml` | `macaroon_secret_key` | Same as `SYNAPSE_MACAROON_SECRET_KEY` above |
-| `apps/matrix/synapse.yaml` | `form_secret` | Same as `SYNAPSE_FORM_SECRET` above |
-| `apps/matrix/element.yaml` | `base_url` | Same as `public_baseurl` above |
-| `apps/matrix/element.yaml` | `server_name` | Same as `server_name` above |
+| `apps/matrix/matrix-secrets.yaml` | All 4 `CHANGE_ME_BEFORE_DEPLOY` values | Replace, then encrypt with SOPS |
+| `apps/matrix/synapse-config.yaml` | `server_name`, `public_baseurl`, database `password`, `registration_shared_secret`, `macaroon_secret_key`, `form_secret` | Replace all, then encrypt with SOPS |
+| `apps/matrix/element.yaml` | `base_url`, `server_name` in `config.json` | Plain text — no encryption needed |
+
+The `sops-age` Kubernetes Secret (Step 2) is applied out-of-band and never committed to Git.
 
 ---
 
-## Production hardening
+## Cluster recovery / rebuilding from scratch
 
-The steps above are sufficient for a private home lab. For a more hardened setup, consider the following improvements. None of them are required to get Matrix working, but they are worth addressing before exposing the service publicly.
+If the cluster is wiped and you need to restore the Matrix deployment:
 
-### Encrypt secrets with SOPS + age (recommended)
-
-Storing plain-text secrets in Git is acceptable for a private repository but is a bad practice for any repo that might become public. SOPS encrypts secret values in place so the ciphertext is committed to Git and Flux decrypts it at apply time.
-
-1. Install `age` and `sops` on your workstation.
-2. Generate an age keypair:
+1. Install K3s and bootstrap Flux as documented in `README.md`.
+2. Retrieve your age private key from your secure backup (password manager, encrypted drive).
+3. Re-create the `sops-age` Secret in the new cluster:
    ```bash
-   age-keygen -o age.key
-   # Note the public key printed (starts with "age1...")
-   ```
-3. Create a Kubernetes Secret that holds the age private key so Flux can decrypt:
-   ```bash
-   cat age.key | kubectl create secret generic sops-age \
+   kubectl create secret generic sops-age \
      --namespace=flux-system \
-     --from-file=age.agekey=/dev/stdin
+     --from-file=age.agekey=age.key
    ```
-4. Patch the `kustomize-controller` to use the age key (see [Flux SOPS guide](https://fluxcd.io/flux/guides/mozilla-sops/)).
-5. Create a `.sops.yaml` rule file in the repo root:
-   ```yaml
-   creation_rules:
-     - path_regex: apps/matrix/.*\.yaml$
-       age: age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-   ```
-6. Encrypt `apps/matrix/postgres.yaml`:
-   ```bash
-   sops --encrypt --in-place apps/matrix/postgres.yaml
-   ```
-7. The file now contains encrypted ciphertext for all secret values. Commit it normally.
+4. Flux reconciles automatically. It decrypts the SOPS-encrypted files using the key you just provided and re-creates the Matrix stack.
 
-From this point forward, edit secret values with `sops apps/matrix/postgres.yaml` (it decrypts in memory, opens your editor, then re-encrypts on save).
+No other manual steps are needed. The encrypted Git state is the source of truth.
 
-### Add TLS with cert-manager
+> **PostgreSQL data is stored in a PersistentVolume on the node's USB storage.** If the storage is intact, data survives a cluster wipe and reinstall as long as the PVC is rebound. If storage is lost, the database must be restored from a backup (database backups are outside the scope of this guide).
 
-The current setup serves everything over plain HTTP on NodePorts. For any exposure beyond your local LAN, add TLS:
+---
 
-1. Deploy cert-manager (add to `infrastructure/`) using the [cert-manager Helm chart](https://cert-manager.io/docs/installation/helm/).
-2. Add an `Ingress` resource to `apps/matrix/` with a `cert-manager.io/cluster-issuer` annotation.
-3. Point a real domain (`matrix.yourdomain.com`) to your node's IP via DNS.
-4. Update `server_name` and `public_baseurl` in `synapse.yaml` to use `https://matrix.yourdomain.com`.
-5. Update `base_url` in `element.yaml` to match.
+## Making future configuration changes
 
-> **Important:** Changing `server_name` after users and rooms have been created is not supported. Set the final domain name before creating any accounts.
+### Changing non-secret Synapse settings (e.g. disabling federation)
 
-### Restrict federation
-
-By default, Synapse federates with any Matrix server including `matrix.org`. To limit this to specific servers (or disable federation entirely):
-
-Edit `apps/matrix/synapse.yaml` and add inside `homeserver.yaml`:
-```yaml
-    # Allow federation only with specific servers
-    federation_domain_whitelist:
-      - matrix.org
-      - your-trusted-server.example.com
-
-    # OR disable federation entirely
-    # federation_sender_instances: []
-    # federation_rcv_ignore_list:
-    #   - "*"
+Edit `synapse-config.yaml` via SOPS:
+```bash
+sops apps/matrix/synapse-config.yaml
+# Make your changes in the editor, save, close.
+git add apps/matrix/synapse-config.yaml
+git commit -m "chore(matrix): <describe change>"
+git push
 ```
 
-### Add TURN/STUN for voice and video calls
+### Rotating secrets
 
-Voice and video calls between clients behind NAT require a TURN server (e.g. coturn). Without it, calls will fail in most home network configurations. This is an explicit known limitation of the current deployment — add coturn to `infrastructure/` if you need calling support.
+If you need to rotate any secret:
+
+1. Open `matrix-secrets.yaml` for editing:
+   ```bash
+   sops apps/matrix/matrix-secrets.yaml
+   ```
+2. Update the relevant value, save, and close. SOPS re-encrypts automatically.
+3. If you rotated `POSTGRES_PASSWORD`, also open `synapse-config.yaml` and update `database.args.password` to match:
+   ```bash
+   sops apps/matrix/synapse-config.yaml
+   ```
+4. Commit and push both files.
+5. The PostgreSQL user password is NOT automatically updated in the database. After Flux reconciles (which will start failing because Synapse can't connect), reset the password in the database:
+   ```bash
+   kubectl exec -it -n matrix deploy/matrix-postgres -- \
+     psql -U synapse -c "ALTER USER synapse PASSWORD '<new-password>';"
+   ```
 
 ---
 
 ## Troubleshooting
 
-### Synapse pod is `CrashLoopBackOff`
+### Flux `apps` kustomization failing to decrypt
+
+```bash
+kubectl describe kustomization -n flux-system apps | grep -A 20 "Status:"
+flux logs --kind=Kustomization --name=apps --namespace=flux-system
+```
+
+Common causes:
+- **`sops-age` Secret is missing**: run `kubectl get secret sops-age -n flux-system`. If absent, re-create it (Step 2).
+- **Wrong age key**: the `sops-age` Secret holds a different private key than what was used to encrypt. Re-encrypt with the correct key or restore the correct `age.key`.
+- **File not encrypted**: if `matrix-secrets.yaml` or `synapse-config.yaml` was committed in plain text, Flux may try to apply it without decryption errors, but credentials end up exposed. Check:
+  ```bash
+  git show HEAD:apps/matrix/matrix-secrets.yaml | grep "ENC\["
+  # Must show encrypted values, not CHANGE_ME_BEFORE_DEPLOY or plain passwords
+  ```
+
+### Synapse pod is in `CrashLoopBackOff`
 
 ```bash
 kubectl logs -n matrix deploy/synapse --previous
 ```
 
 Common causes:
-- **Database connection refused**: the password in the ConfigMap does not match `POSTGRES_PASSWORD` in the Secret. Re-check Step 5c.
-- **Invalid configuration**: a YAML syntax error in the embedded `homeserver.yaml`. Validate the file locally with `kustomize build apps/matrix/`.
-- **PostgreSQL not ready**: the init container should handle this, but if Postgres itself is crashing, check `kubectl logs -n matrix deploy/matrix-postgres`.
+- **Database connection refused** — the password in `synapse-config.yaml` does not match `POSTGRES_PASSWORD`. Open both files with `sops` and verify they are identical. Reconcile after fixing.
+- **YAML syntax error** — an error was introduced while editing `synapse-config.yaml`. The homeserver.yaml is a YAML file embedded as a string inside YAML; indentation errors are common. Check for misaligned lines.
+- **PostgreSQL not ready** — check: `kubectl logs -n matrix deploy/matrix-postgres`
 
-### PostgreSQL pod is `CrashLoopBackOff`
+### PostgreSQL pod is in `CrashLoopBackOff`
 
 ```bash
 kubectl logs -n matrix deploy/matrix-postgres
 ```
 
-Common cause: a previous run created the data directory with a different password. Delete the PVC and let Kubernetes recreate it:
-
+If a previous run left the data directory with a different password, delete the PVC to reset:
 ```bash
 kubectl delete pvc -n matrix matrix-postgres-data
-# Flux will recreate it on next reconcile
 flux reconcile kustomization apps --with-source
 ```
 
-> **Warning:** This deletes all database data. Only do this before any real data exists.
+> **Warning:** This destroys all database data. Only do this before any real accounts or rooms exist.
 
 ### Element Web shows "Homeserver not found"
 
-1. Confirm Synapse is running: `curl http://192.168.1.100:30067/health`
-2. Confirm `base_url` in `element.yaml` exactly matches `public_baseurl` in `synapse.yaml`
-3. Check the browser console (F12 → Console) for the exact error
+1. Confirm Synapse is reachable: `curl http://192.168.1.100:30067/health`
+2. Open the browser developer tools (F12 → Console) and look for the exact network error.
+3. Confirm `base_url` in `element.yaml` exactly matches `public_baseurl` in `synapse-config.yaml`:
+   ```bash
+   # Check element.yaml (plain text, grep directly)
+   grep "base_url" apps/matrix/element.yaml
 
-### Flux not applying the changes
+   # Check synapse-config.yaml (encrypted, use sops to read)
+   sops --decrypt apps/matrix/synapse-config.yaml | grep "public_baseurl"
+   ```
 
+### Checking decrypted values without editing
+
+To inspect the current decrypted content of a SOPS-encrypted file:
 ```bash
-# Check for reconciliation errors
-flux get kustomizations
-kubectl describe kustomization -n flux-system apps
-
-# Force a fresh reconcile
-flux reconcile kustomization apps --with-source
-
-# Check for YAML errors in your edits
-kustomize build apps/matrix/
+sops --decrypt apps/matrix/matrix-secrets.yaml
+sops --decrypt apps/matrix/synapse-config.yaml
 ```
 
-### Verify all placeholders are gone
+This prints the plain-text content to stdout without saving it anywhere.
+
+### Verifying no plain-text secrets are in Git history
 
 ```bash
-grep -rn "CHANGE_ME_BEFORE_DEPLOY\|<NODE_IP>\|matrix\.example\.com" apps/matrix/
+# Check current HEAD
+git show HEAD:apps/matrix/matrix-secrets.yaml | grep -v "ENC\[" | grep -i "password\|secret\|key"
+
+# Check last 10 commits
+git log --oneline -10 | awk '{print $1}' | while read sha; do
+  result=$(git show "$sha":apps/matrix/matrix-secrets.yaml 2>/dev/null | grep -v "ENC\[" | grep -i "password\|secret\|key")
+  [ -n "$result" ] && echo "⚠️  Plain-text secret found in commit $sha"
+done
 ```
 
-This command should return no output. Any output means there is still a placeholder that needs replacing.
+If a plain-text secret was ever committed, treat it as compromised: rotate the value, re-encrypt, and consider the repository history permanently tainted (even after a `git push --force`, the history may be cached elsewhere).
+
+---
+
+## Known limitations
+
+- **No TLS**: served over HTTP. Add an ingress controller with cert-manager for HTTPS. Note: changing to HTTPS requires updating `server_name`, `public_baseurl`, and `element.yaml` — see AGENTS.md before adding ingress.
+- **No TURN/VoIP**: voice and video calls across NAT require a TURN server (e.g. coturn), which is not configured.
+- **Single replica**: no high availability — appropriate for edge/SBC.
+- **No SSO/OIDC**: password authentication only.
+- **Federation enabled**: Synapse federates with matrix.org and other public servers by default. Add `federation_domain_whitelist` to `synapse-config.yaml` (via `sops`) to restrict this.
+

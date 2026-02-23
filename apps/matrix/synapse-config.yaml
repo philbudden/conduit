@@ -1,0 +1,89 @@
+# synapse-config — Synapse homeserver.yaml configuration
+#
+# ⚠️  THIS FILE MUST BE ENCRYPTED WITH SOPS BEFORE COMMITTING TO GIT.
+#     It embeds cryptographic secrets (macaroon key, form secret, db password,
+#     registration shared secret) directly in the homeserver.yaml content.
+#     This repository is public. Plain-text secrets committed here are immediately
+#     exposed to anyone. Always encrypt before every commit.
+#
+#     First-time setup:
+#       1. Edit this file: replace all CHANGE_ME_BEFORE_DEPLOY and placeholder values.
+#       2. Encrypt: sops --encrypt --in-place apps/matrix/synapse-config.yaml
+#       3. Commit the encrypted file.
+#     To edit later: sops apps/matrix/synapse-config.yaml
+#
+#     See MATRIX.md for full setup instructions.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: synapse-config
+  namespace: matrix
+data:
+  homeserver.yaml: |
+    # Matrix server identity - set to your actual domain or node IP before encrypting.
+    # ⚠️  This value CANNOT be changed after the first user or room is created.
+    server_name: "matrix.example.com"
+
+    # Public URL reachable by clients and federation partners.
+    # For local/SBC use without DNS: "http://<NODE_IP>:30067"
+    public_baseurl: "http://matrix.example.com:30067"
+
+    listeners:
+      - port: 8008
+        tls: false
+        type: http
+        x_forwarded: true
+        resources:
+          - names: [client, federation]
+            compress: false
+
+    database:
+      name: psycopg2
+      args:
+        user: synapse
+        password: CHANGE_ME_BEFORE_DEPLOY
+        database: synapse
+        host: matrix-postgres
+        port: 5432
+        cp_min: 5
+        cp_max: 10
+
+    log_config: "/conf/log.config"
+    media_store_path: /data/media_store
+
+    registration_shared_secret: "CHANGE_ME_BEFORE_DEPLOY"
+
+    report_stats: false
+
+    macaroon_secret_key: "CHANGE_ME_BEFORE_DEPLOY"
+
+    form_secret: "CHANGE_ME_BEFORE_DEPLOY"
+
+    signing_key_path: "/data/signing.key"
+
+    trusted_key_servers:
+      - server_name: "matrix.org"
+
+    # Allow open registration for initial setup.
+    # Disable after creating admin account: set enable_registration: false,
+    # then re-encrypt and commit.
+    enable_registration: true
+    enable_registration_without_verification: true
+
+  log.config: |
+    version: 1
+    formatters:
+      precise:
+        format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: precise
+    loggers:
+      synapse.storage.SQL:
+        level: WARNING
+    root:
+      level: INFO
+      handlers: [console]
+    disable_existing_loggers: false

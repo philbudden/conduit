@@ -3,9 +3,15 @@ kind: Kustomization
 resources:
   # Namespace must exist before all other resources
   - namespace.yaml
-  # PostgreSQL: credentials Secret, PVC, Deployment, Service
+  # Shared secrets: PostgreSQL credentials + Synapse crypto keys
+  # ⚠️  This file MUST be SOPS-encrypted before committing. See MATRIX.md.
+  - matrix-secrets.yaml
+  # PostgreSQL: PVC, Deployment, Service
   - postgres.yaml
-  # Synapse: config ConfigMap, data PVC, Deployment, Service
+  # Synapse config: homeserver.yaml + log config (contains secrets)
+  # ⚠️  This file MUST be SOPS-encrypted before committing. See MATRIX.md.
+  - synapse-config.yaml
+  # Synapse: data PVC, Deployment, Service
   - synapse.yaml
   # Element Web: config ConfigMap, Deployment, Service
   - element.yaml
