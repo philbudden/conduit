@@ -48,6 +48,7 @@ spec:
       labels:
         app: element-web
     spec:
+      enableServiceLinks: false
       containers:
         - name: element-web
           # ghcr.io/element-hq/element-web:v1.12.10
