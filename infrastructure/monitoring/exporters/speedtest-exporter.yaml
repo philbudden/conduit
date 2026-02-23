@@ -35,16 +35,16 @@ spec:
             httpGet:
               path: /metrics
               port: 9798
-            initialDelaySeconds: 30
-            periodSeconds: 60
-            timeoutSeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 120
+            timeoutSeconds: 90
           readinessProbe:
             httpGet:
               path: /metrics
               port: 9798
-            initialDelaySeconds: 10
-            periodSeconds: 30
-            timeoutSeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 120
+            timeoutSeconds: 90
 ---
 apiVersion: v1
 kind: Service
