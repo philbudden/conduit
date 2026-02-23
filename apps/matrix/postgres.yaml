@@ -51,6 +51,9 @@ spec:
             # PGDATA must be a subdirectory of the mount point (Kubernetes requirement)
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            # Synapse requires C locale/collation for correct text ordering
+            - name: POSTGRES_INITDB_ARGS
+              value: "--lc-collate=C --lc-ctype=C"
           envFrom:
             - secretRef:
                 name: matrix-secrets
