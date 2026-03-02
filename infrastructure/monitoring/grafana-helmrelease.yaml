@@ -117,7 +117,7 @@ spec:
         # Node Exporter Full dashboard
         node-exporter:
           gnetId: 1860
-          revision: 37
+          revision: 41
           datasource: Prometheus
 
     # Extra ConfigMap mounts for custom dashboards
