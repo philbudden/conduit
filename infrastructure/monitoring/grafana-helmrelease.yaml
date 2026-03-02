@@ -69,7 +69,7 @@ spec:
       datasources.yaml:
         apiVersion: 1
         datasources:
-          - name: Prometheus
+          - name: prometheus
             type: prometheus
             url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9091
             access: proxy
