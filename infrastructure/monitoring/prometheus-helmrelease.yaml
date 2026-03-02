@@ -149,20 +149,19 @@ spec:
           cpu: 200m
           memory: 256Mi
 
-    # Disable node-exporter (deployed as standalone DaemonSet in exporters/)
+    # Disable node-exporter (can enable later if needed)
     nodeExporter:
       enabled: false
 
-    # Enable kube-state-metrics - required for Kubernetes Cluster dashboard (ID 7249)
-    # Provides kube_* metrics: pod status, deployment replicas, namespace info, etc.
+    # Enable kube-state-metrics for Kubernetes Cluster dashboard (gnetId: 7249)
+    # Provides kube_* metrics required by the dashboard
     kubeStateMetrics:
       enabled: true
 
-    # kube-state-metrics sub-chart values (hyphenated key = sub-chart passthrough)
     kube-state-metrics:
       resources:
         requests:
-          cpu: 10m
+          cpu: 20m
           memory: 64Mi
         limits:
           cpu: 100m
