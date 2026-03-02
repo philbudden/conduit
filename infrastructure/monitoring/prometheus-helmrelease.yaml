@@ -153,9 +153,19 @@ spec:
     nodeExporter:
       enabled: false
 
-    # Disable kube-state-metrics initially
+    # Enable kube-state-metrics for Kubernetes Cluster dashboard (gnetId: 7249)
+    # Provides kube_* metrics required by the dashboard
     kubeStateMetrics:
-      enabled: false
+      enabled: true
+
+    kube-state-metrics:
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
 
     # Disable default ServiceMonitors to reduce noise
     # Re-enable selectively later
@@ -182,7 +192,7 @@ spec:
         kubernetesSystem: true
         kubeSchedulerAlerting: false
         kubeSchedulerRecording: false
-        kubeStateMetrics: false
+        kubeStateMetrics: true
         network: true
         node: false
         nodeExporterAlerting: false
