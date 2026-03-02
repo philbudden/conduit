@@ -3,5 +3,3 @@ kind: Kustomization
 resources:
   # Platform monitoring (Prometheus, Grafana, exporters)
   - monitoring/
-  # Kubernetes Dashboard (web UI)
-  - dashboard/

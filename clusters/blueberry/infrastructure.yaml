@@ -37,7 +37,3 @@ spec:
       kind: DaemonSet
       name: node-exporter
       namespace: monitoring
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: headlamp
-      namespace: kubernetes-dashboard
