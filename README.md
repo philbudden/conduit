@@ -285,7 +285,7 @@ Self-hosted Matrix communications platform:
 
 Browser-based chat interface for interacting with Large Language Models served by Ollama.
 
-**OpenWebUI (ghcr.io/open-webui/open-webui:v0.6.5)**:
+**OpenWebUI (ghcr.io/open-webui/open-webui:v0.8.10)**:
 - Connects to Ollama running on **macserver** over Tailscale — URL stored in SOPS-encrypted secret
 - 2Gi persistent volume for chat history, user accounts, and settings (SQLite)
 - NodePort 30808 → container port 8080
