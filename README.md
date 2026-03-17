@@ -289,7 +289,7 @@ Browser-based chat interface for interacting with Large Language Models served b
 - Connects to Ollama running on **macserver** over Tailscale — URL stored in SOPS-encrypted secret
 - 2Gi persistent volume for chat history, user accounts, and settings (SQLite)
 - NodePort 30808 → container port 8080
-- Resource usage: 100m CPU / 256Mi RAM (requests), up to 500m CPU / 512Mi RAM
+- Resource usage: 100m CPU / 512Mi RAM (requests), up to 500m CPU / 1Gi RAM
 - Auth: first signup becomes admin. After creating your account, disable further signups via **Settings → Admin → Disable New User Signups**.
 
 **Accessing OpenWebUI**:
@@ -320,7 +320,7 @@ sops --encrypt --age "$AGE_PUBLIC_KEY" --in-place apps/openwebui/openwebui-secre
 
 **Total OpenWebUI resource usage (approximate)**:
 - CPU: ~100m requests / ~500m limits
-- RAM: ~256Mi requests / ~512Mi limits
+- RAM: ~512Mi requests / ~1Gi limits
 - Storage: 2Gi (1 PVC)
 
 ---
