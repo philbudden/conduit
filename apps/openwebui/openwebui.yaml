@@ -54,19 +54,22 @@ spec:
                 secretKeyRef:
                   name: openwebui-secrets
                   key: OLLAMA_BASE_URL
-            # Cache HuggingFace models on the PVC so they survive restarts
-            - name: HF_HOME
-              value: /app/backend/data/huggingface
+            # Use Ollama for RAG embeddings — avoids loading a local sentence-transformers
+            # model on the RPi4 (OOM). nomic-embed-text is already available in Ollama.
+            - name: RAG_EMBEDDING_ENGINE
+              value: "ollama"
+            - name: RAG_EMBEDDING_MODEL
+              value: "nomic-embed-text"
           volumeMounts:
             - name: data
               mountPath: /app/backend/data
           resources:
             requests:
               cpu: 100m
-              memory: 512Mi
+              memory: 256Mi
             limits:
               cpu: 500m
-              memory: 1Gi
+              memory: 512Mi
           livenessProbe:
             httpGet:
               path: /health
