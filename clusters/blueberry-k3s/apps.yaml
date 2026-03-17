@@ -36,3 +36,7 @@ spec:
       kind: Deployment
       name: element-web
       namespace: matrix
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: openwebui
+      namespace: openwebui

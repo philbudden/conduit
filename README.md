@@ -281,6 +281,50 @@ Self-hosted Matrix communications platform:
 
 ---
 
+#### OpenWebUI (`apps/openwebui/`)
+
+Browser-based chat interface for interacting with Large Language Models served by Ollama.
+
+**OpenWebUI (ghcr.io/open-webui/open-webui:v0.6.5)**:
+- Connects to Ollama running on **macserver** over Tailscale — URL stored in SOPS-encrypted secret
+- 2Gi persistent volume for chat history, user accounts, and settings (SQLite)
+- NodePort 30808 → container port 8080
+- Resource usage: 100m CPU / 256Mi RAM (requests), up to 500m CPU / 512Mi RAM
+- Auth: first signup becomes admin. After creating your account, disable further signups via **Settings → Admin → Disable New User Signups**.
+
+**Accessing OpenWebUI**:
+- URL: `http://<node-ip>:30808`
+
+**Adding the Ollama secret before deploying**:
+
+OpenWebUI requires one SOPS-encrypted secret (`apps/openwebui/openwebui-secrets.yaml`) containing the Ollama backend URL. This is encrypted identically to the Matrix secrets.
+
+If re-creating from scratch:
+```bash
+# 1. Write the plaintext secret (substitute your Ollama backend URL)
+cat > apps/openwebui/openwebui-secrets.yaml <<'EOF'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openwebui-secrets
+  namespace: openwebui
+type: Opaque
+stringData:
+  OLLAMA_BASE_URL: "http://<ollama-host>:<port>"
+EOF
+
+# 2. Encrypt in-place
+AGE_PUBLIC_KEY=$(grep "^# public key:" ~/.config/sops/age/keys.txt | awk '{print $NF}')
+sops --encrypt --age "$AGE_PUBLIC_KEY" --in-place apps/openwebui/openwebui-secrets.yaml
+```
+
+**Total OpenWebUI resource usage (approximate)**:
+- CPU: ~100m requests / ~500m limits
+- RAM: ~256Mi requests / ~512Mi limits
+- Storage: 2Gi (1 PVC)
+
+---
+
 ### Infrastructure
 
 #### Monitoring (`infrastructure/monitoring/`)

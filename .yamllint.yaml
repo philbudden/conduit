@@ -20,3 +20,4 @@ ignore: |
   clusters/blueberry/flux-system/gotk-components.yaml
   apps/matrix/matrix-secrets.yaml
   apps/matrix/synapse-config.yaml
+  apps/openwebui/openwebui-secrets.yaml

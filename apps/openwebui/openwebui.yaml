@@ -1,0 +1,102 @@
+# OpenWebUI
+#
+# Web-based UI for interacting with Ollama LLM models.
+# Source: ghcr.io/open-webui/open-webui
+#
+# Ollama backend: macserver over Tailscale — URL stored in SOPS-encrypted secret.
+# Data (chat history, settings) persisted in openwebui-data PVC via K3S local-path provisioner.
+# Served on NodePort 30808.
+#
+# Auth: first-signup-becomes-admin (default). Registration is open for initial setup.
+# After creating your admin account, disable further signups via Settings → Admin.
+---
+# PVC for OpenWebUI data: chat history, user accounts, settings (SQLite).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-data
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: openwebui
+  labels:
+    app: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+    spec:
+      containers:
+        - name: openwebui
+          # ghcr.io/open-webui/open-webui:v0.6.5
+          image: ghcr.io/open-webui/open-webui:v0.6.5
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: OLLAMA_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: openwebui-secrets
+                  key: OLLAMA_BASE_URL
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openwebui-data
+---
+# NodePort 30808 → container port 8080 (OpenWebUI)
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+  namespace: openwebui
+  labels:
+    app: openwebui
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30808
+      protocol: TCP
+  selector:
+    app: openwebui
