@@ -36,14 +36,12 @@ spec:
               cpu: 500m
               memory: 128Mi
           livenessProbe:
-            httpGet:
-              path: /healthz
+            tcpSocket:
               port: 9798
             initialDelaySeconds: 30
             periodSeconds: 60
           readinessProbe:
-            httpGet:
-              path: /healthz
+            tcpSocket:
               port: 9798
             initialDelaySeconds: 10
             periodSeconds: 30
